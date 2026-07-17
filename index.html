@@ -348,8 +348,12 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-tp="lp">💿 LP 레코드</button>
       </div>
       <div class="sliders" id="lpOpts" style="display:none">
-        <div class="slider"><label>LP 크기 <span class="slider-rhs"><b id="lpScaleV" style="display:none">100%</b><input type="number" class="snum" id="lpScaleN" min="50" max="160" value="100"><small class="usuf">%</small></span></label>
-          <input type="range" id="lpScale" min="50" max="160" value="100"></div>
+        <div class="slider"><label>LP 크기(줌) <span class="slider-rhs"><b id="lpScaleV" style="display:none">100%</b><input type="number" class="snum" id="lpScaleN" min="100" max="240" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpScale" min="100" max="240" value="100"></div>
+        <div class="slider"><label>LP 가로 위치 <span class="slider-rhs"><b id="lpXV" style="display:none">50%</b><input type="number" class="snum" id="lpXN" min="0" max="100" value="50"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpX" min="0" max="100" value="50"></div>
+        <div class="slider"><label>LP 세로 위치 <span class="slider-rhs"><b id="lpYV" style="display:none">50%</b><input type="number" class="snum" id="lpYN" min="0" max="100" value="50"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpY" min="0" max="100" value="50"></div>
       </div>
       <div class="hint2" id="lpHint" style="display:none;margin-top:6px">💿 LP판은 미리보기에서 드래그로 옮길 수 있어요. 곡이 시작되면 바늘이 올라가고, 곡이 끝나면 바늘이 빠지며 판이 바뀝니다.</div>
       </div></div>
@@ -2699,7 +2703,10 @@ function makeGrainTile(n){
   cx.putImageData(img,0,0); return c;
 }
 const yieldTask=()=>new Promise(r=>{const c=new MessageChannel();c.port1.onmessage=()=>r();c.port2.postMessage(0);});
-const withTimeout=(p,ms,msg)=>Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)),ms))]);
+const withTimeout=(p,ms,msg)=>{ let to; return Promise.race([
+  Promise.resolve(p).finally(()=>clearTimeout(to)),
+  new Promise((_,rej)=>{ to=setTimeout(()=>rej(new Error(msg)),ms); })
+]); };
 function sliceAudioBuffer(buf, s, e){
   const sr=buf.sampleRate, i0=Math.max(0,Math.floor(s*sr)), i1=Math.min(buf.length,Math.floor(e*sr));
   const len=Math.max(1,i1-i0);
@@ -6167,6 +6174,8 @@ bindSlider('lpScale','lpScaleV',v=>{
   if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1};
   state.el.lp.scale=v/100;
 });
+bindSlider('lpX','lpXV',v=>{ if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1}; state.el.lp.x=v/100; });
+bindSlider('lpY','lpYV',v=>{ if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1}; state.el.lp.y=v/100; });
 /* 트랙 번호 라벨 */
 $('tlbShowBtn').addEventListener('click',e=>{
   e.target.classList.toggle('on');
@@ -6398,8 +6407,10 @@ async function startExport(){
       drawFrame(t, true, rg, W, H, false);
       const vf=new VideoFrame(rcanvas,{timestamp:Math.round(f*1e6/FPS),duration:Math.round(1e6/FPS)});
       vEnc.encode(vf,{keyFrame:f%(FPS*2)===0}); vf.close();
-      while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr)
-        await withTimeout(new Promise(r=>setTimeout(r,3)),8000,'video backpressure timeout');
+      /* 백프레셔 — 평범한 sleep만 사용 (타이머 누수 방지), 최대 대기 상한 */
+      let guard=0;
+      while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && guard++<2500)
+        await new Promise(r=>setTimeout(r,4));
       if(f%15===0){
         const pct=f/totalFrames, spd=(f/FPS)/((performance.now()-t0)/1000);
         const eta=spd>0?(dur-f/FPS)/spd:0;
@@ -6597,6 +6608,8 @@ function syncUIFromState(){
   setS('waveSW','waveSWV',Math.round(state.el.wave.sw*100));
   setS('waveSH','waveSHV',Math.round(state.el.wave.sh*100));
   setS('lpScale','lpScaleV',Math.round((state.el.lp?state.el.lp.scale||1:1)*100));
+  setS('lpX','lpXV',Math.round((state.el.lp&&state.el.lp.x!=null?state.el.lp.x:.5)*100));
+  setS('lpY','lpYV',Math.round((state.el.lp&&state.el.lp.y!=null?state.el.lp.y:.5)*100));
   setS('subSize','subSizeV',Math.round(state.subStyle.size*100));
   setS('subY','subYV',Math.round(state.subStyle.y*100));
   $('titleColor').value=state.titleColor; $('waveColor').value=state.waveColor;
