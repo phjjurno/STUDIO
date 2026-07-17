@@ -5199,18 +5199,20 @@ function drawMediaClip(c,t,fx,p){
   if(R.preview) HIT.push({id:'mc:'+c.id, x:cx-dw/2, y:cy-dh/2, w:dw, h:dh});
 }
 
-/* ───────── LP 레코드 템플릿 (실사 사진: deck.jpg + 회전 vinyl.png) ───────── */
+/* ───────── LP 레코드 템플릿 (실사 사진: deck + 회전 vinyl + 움직이는 tonearm) ───────── */
 /* deck 정규좌표: 플래터 중심 (0.399,0.483) · 레코드 반경 0.335W · 라벨/레코드 비 0.393 */
 const LP_DECK={platX:0.399, platY:0.483, recR:0.335, labelRatio:0.393};
-let lpDeck=null, lpVinyl=null, lpLoad=null, lpFailed=false;
+/* 톤암 스프라이트: deck 정규좌표 배치 rect + 피벗 + 재생 시 회전각(도) */
+const LP_ARM={x0:0.6567, y0:0.0382, x1:0.9341, y1:0.8931, pvx:0.8203, pvy:0.2133, playDeg:41.5};
+let lpDeck=null, lpVinyl=null, lpArm=null, lpLoad=null, lpFailed=false;
 function ensureLP(){
   if(lpLoad) return lpLoad;
   lpLoad=(async()=>{
     try{
       const load=src=>new Promise((res,rej)=>{ const im=new Image();
         im.onload=()=>res(im); im.onerror=rej; im.src=src; });
-      const [d,v]=await Promise.all([load('deck.jpg'), load('vinyl.png')]);
-      lpDeck=d; lpVinyl=v;
+      const [d,v,arm]=await Promise.all([load('deck.jpg'), load('vinyl.png'), load('arm.png')]);
+      lpDeck=d; lpVinyl=v; lpArm=arm;
     }catch(e){ lpFailed=true; }
   })();
   return lpLoad;
@@ -5218,7 +5220,7 @@ function ensureLP(){
 function drawLP(t, c, idx, cs, a){
   const {g,w,h}=R;
   const title=c.title||(a?a.name:'');
-  if(!lpDeck||!lpVinyl){
+  if(!lpDeck||!lpVinyl||!lpArm){
     if(!lpFailed) ensureLP().then(()=>{ if(!state.playing&&!state.rendering) drawNow(); });
     drawLPFallback(t,c,idx,cs,title); return;
   }
@@ -5238,10 +5240,19 @@ function drawLP(t, c, idx, cs, a){
   const eOut=p=>{ p=clamp(p,0,1); return 1-Math.pow(1-p,3); };
   const IN=1.1, OUT=0.9, hasNext=idx<cs.length-1;
 
-  /* 레코드 교체 연출: 페이드 + 들어올림 + 살짝 확대 (데크·톤암은 사진 그대로 고정) */
+  /* 레코드 교체 연출: 페이드 + 들어올림 + 살짝 확대 */
   let recA=1, recLift=0, recS=1;
   if(lt<IN){ const p=eOut(lt/IN); recA=p; recLift=-(1-p)*recR*.45; recS=.92+.08*p; }
   if(hasNext && rem<OUT){ const p=eOut(1-rem/OUT); recA=1-p; recLift=-p*recR*.45; recS=1-.06*p; }
+
+  /* 톤암: 곡 시작 시 레코드로 내려앉고(swing-in), 곡 끝나면 들려서 복귀(swing-out) */
+  const IN_ARM=1.3, OUT_ARM=1.0;
+  let armFrac=1;                                       /* 0=대기(off), 1=재생(on record) */
+  if(lt<IN_ARM) armFrac=eOut(lt/IN_ARM);
+  if(rem<OUT_ARM) armFrac=Math.min(armFrac, eOut(rem/OUT_ARM));
+  const drift=1+.06*clamp(lt/dur,0,1);                 /* 재생 중 안쪽으로 미세 이동 */
+  const armDeg=LP_ARM.playDeg*armFrac*drift;
+  const armLift=(1-armFrac)*drawH*.012;                /* 들릴 때 살짝 위로 (큐잉) */
 
   const spin=t*3.49;                                  /* 33⅓ RPM */
   g.save();
@@ -5267,10 +5278,23 @@ function drawLP(t, c, idx, cs, a){
     sg.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle=sg; g.fillRect(-rr,-rr,rr*2,rr*2);
     g.restore();
-    /* 라벨 위 제목 (수평 고정) */
-    if(state.showTitle){ g.save(); g.globalAlpha=recA;
-      drawLPTitle(g, pcx, cy, rr*LP_DECK.labelRatio, title, idx, cs.length); g.restore(); }
+    /* 라벨 위 제목 — LP와 함께 회전 */
+    if(state.showTitle){
+      g.save(); g.globalAlpha=recA;
+      g.translate(pcx,cy); g.rotate(spin); g.translate(-pcx,-cy);
+      drawLPTitle(g, pcx, cy, rr*LP_DECK.labelRatio, title, idx, cs.length);
+      g.restore();
+    }
   }
+  /* 톤암 (피벗 기준 회전 + 큐잉 리프트) — 레코드 위에 그림 */
+  const [ax0,ay0]=map(LP_ARM.x0,LP_ARM.y0);
+  const [apx,apy]=map(LP_ARM.pvx,LP_ARM.pvy);
+  const armW=(LP_ARM.x1-LP_ARM.x0)*drawW, armH=(LP_ARM.y1-LP_ARM.y0)*drawH;
+  g.save();
+  g.translate(0,-armLift);
+  g.translate(apx,apy); g.rotate(armDeg*Math.PI/180); g.translate(-apx,-apy);
+  g.drawImage(lpArm, ax0, ay0, armW, armH);
+  g.restore();
   g.restore();
   if(R.preview) HIT.push({id:'lp', x:pcx-recR, y:pcy-recR, w:recR*2, h:recR*2});
 }
