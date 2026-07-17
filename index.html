@@ -342,6 +342,18 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
+      <div class="grp open"><div class="grp-h">템플릿<span class="chev">▾</span></div><div class="grp-b">
+      <div class="row" id="tplRow">
+        <button class="chip on" data-tp="none">기본</button>
+        <button class="chip" data-tp="lp">💿 LP 레코드</button>
+      </div>
+      <div class="sliders" id="lpOpts" style="display:none">
+        <div class="slider"><label>LP 크기 <span class="slider-rhs"><b id="lpScaleV" style="display:none">100%</b><input type="number" class="snum" id="lpScaleN" min="50" max="160" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpScale" min="50" max="160" value="100"></div>
+      </div>
+      <div class="hint2" id="lpHint" style="display:none;margin-top:6px">💿 LP판은 미리보기에서 드래그로 옮길 수 있어요. 곡이 시작되면 바늘이 올라가고, 곡이 끝나면 바늘이 빠지며 판이 바뀝니다.</div>
+      </div></div>
+
       <div class="grp"><div class="grp-h">제목 폰트 · 색상 · 효과<span class="chev">▾</span></div><div class="grp-b">
       <div class="opt-label">제목 폰트</div>
       <div class="row" id="fontRow">
@@ -402,6 +414,17 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip on" data-fx="vignette">비네트</button>
         <button class="chip on" data-fx="title">제목 표시</button>
       </div>
+      <div class="opt-label">트랙 번호 라벨 (TRACK 01 / 08)</div>
+      <div class="row">
+        <button class="chip on" id="tlbShowBtn">라벨 표시</button>
+        <button class="chip on" id="tlbLinkBtn">제목 색 연동</button>
+        <button class="chip" id="tlbBgBtn">배경 박스</button>
+      </div>
+      <div class="row">
+        <label class="colorpick"><input type="color" id="tlbColor" value="#FFFFFF">라벨 색</label>
+        <label class="colorpick"><input type="color" id="tlbBgColor" value="#000000">배경 색</label>
+      </div>
+      <div class="prow"><select id="tlbFontSel"></select></div>
       </div></div>
 
       <div class="grp"><div class="grp-h">파형<span class="chev">▾</span></div><div class="grp-b">
@@ -2579,7 +2602,10 @@ const state = {
   motion:'zoom', motionInt:1, ambient:'none', ambInt:.6, wave:'bars',
   logo:{img:null, file:null, show:false, x:.09, y:.12, scale:1, opacity:1, bright:1, con:1},
   el:{ wave:{x:.5,y:.74,sw:1,sh:1}, title:{x:.5,y:0,custom:false},
-       label:{x:.5,y:0,custom:false}, lyrics:{x:.5,y:.84,custom:false} },
+       label:{x:.5,y:0,custom:false}, lyrics:{x:.5,y:.84,custom:false},
+       lp:{x:.5,y:.44,scale:1} },
+  template:'none',
+  trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
   waveColor:'#FFFFFF', titleColor:'#FFFFFF',
   glow:1, shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
@@ -3319,11 +3345,33 @@ function bassLevel(live){
   bassSm=bassSm+(t-bassSm)*(t>bassSm?.5:.12);
   return bassSm;
 }
+/* 자동 게인(AGC) — 곡 음량·EQ 성향과 무관하게 파형이 살아 움직이도록 정규화 */
+let agcGain=1, agcTGain=1;
+function updateAGC(live){
+  if(!live) return;
+  /* 주파수: 사용 대역(2~300빈)의 피크를 추적해 최대치가 ~0.8이 되도록 */
+  let mx=0;
+  for(let i=2;i<300;i++) if(freqData[i]>mx) mx=freqData[i];
+  const fg = mx>10? 205/mx : 1;
+  agcGain += (clamp(fg,1,3.4)-agcGain)*.06;
+  /* 시간 파형: RMS 기준 부스트 (라인·리본·플로우 등) */
+  let s=0;
+  for(let i=0;i<2048;i+=8){ const d=(timeData[i]-128)/128; s+=d*d; }
+  const rms=Math.sqrt(s/256);
+  const tg = rms>.004? .24/rms : 1;
+  agcTGain += (clamp(tg,1,7)-agcTGain)*.06;
+}
+/* 시간 파형 샘플 — AGC 부스트 + 소프트클립 */
+function liveSample(f){
+  const s=(timeData[Math.floor(f*2047)]-128)/128;
+  return Math.tanh(s*agcTGain*1.1);
+}
 function getAmp(i,N,live){
   let t;
   if(live){
-    const idx=Math.floor(2 + Math.pow(i/Math.max(1,N-1),1.7)*540);
-    t=Math.pow(freqData[idx]/255, 1.35);
+    /* 음악 에너지가 실제로 있는 저·중역(~7kHz) 중심으로 재매핑 */
+    const idx=Math.floor(2 + Math.pow(i/Math.max(1,N-1),1.5)*298);
+    t=Math.pow(Math.min(1, freqData[idx]/255*agcGain), 1.22);
   }else{
     t=.16+.1*Math.sin(i*.42+R.T*1.18)+.05*Math.sin(i*.93+R.T*3.1);
   }
@@ -4002,6 +4050,7 @@ function drawAmbient(){
 
 /* ───────── 파형 ───────── */
 function drawWave(live){
+  updateAGC(live);
   const {g,w,h}=R, m=Math.min(w,h), T=R.T||0;
   const C=state.waveColor, wv=state.el.wave;
   const CX=wv.x*w, CY=wv.y*h, SW=wv.sw, SH=wv.sh;
@@ -4070,7 +4119,7 @@ function drawWave(live){
     const ys=[];
     for(let i=0;i<=pts;i++){
       let s;
-      if(live){ s=(timeData[Math.floor(i/pts*2047)]-128)/128; }
+      if(live){ s=liveSample(i/pts); }
       else{ s=Math.sin(i*.2+R.T*1.9)*.3*Math.sin(Math.PI*i/pts); }
       const env=Math.sin(Math.PI*i/pts);
       const cur=smoothVals[i]; const t=s*env;
@@ -4242,7 +4291,7 @@ function drawWave(live){
     const ys=[];
     for(let i=0;i<=pts;i++){
       let s;
-      if(live){ s=(timeData[Math.floor(i/pts*2047)]-128)/128; }
+      if(live){ s=liveSample(i/pts); }
       else{ s=Math.sin(i*.2+T*1.9)*.3*Math.sin(Math.PI*i/pts); }
       const env=Math.sin(Math.PI*i/pts);
       const cur=smoothVals[i]; const t2=s*env;
@@ -4314,7 +4363,7 @@ function drawWave(live){
     const y0=CY, ampH=h*.09*SH, pts=64;
     for(let i=0;i<=pts;i++){
       let s;
-      if(live){ s=(timeData[Math.floor(i/pts*2047)]-128)/128; }
+      if(live){ s=liveSample(i/pts); }
       else{ s=Math.sin(i*.25+T*1.8)*.3*Math.sin(Math.PI*i/pts); }
       const env=Math.sin(Math.PI*i/pts);
       const cur=smoothVals[i]; const t2=s*env;
@@ -4507,19 +4556,34 @@ function drawTitle(title, idx, total, progress, tNow){
 
   if(state.shadowOn){ g.shadowColor='rgba(0,0,0,.5)'; g.shadowBlur=w*.006; g.shadowOffsetY=2; }
 
-  if(total>0){
-    g.fillStyle=hexA(state.titleColor,.72);
-    g.font=`500 ${labelFs}px 'Noto Sans KR',sans-serif`;
+  if(total>0 && state.trackLabel.show){
+    const TL=state.trackLabel;
+    const lCol=TL.link? state.titleColor : TL.color;
+    const LF=TL.fontIdx>=0? FONTS[TL.fontIdx] : null;
+    const lfs=LF? Math.round(labelFs*LF.mul) : labelFs;
+    g.font=LF? `${LF.weight} ${lfs}px ${LF.fam},'Noto Sans KR',sans-serif`
+             : `500 ${lfs}px 'Noto Sans KR',sans-serif`;
     try{ g.letterSpacing='0.34em'; }catch(e){}
     const labelText=`TRACK ${String(idx+1).padStart(2,'0')} / ${String(total).padStart(2,'0')}`;
-    g.fillText(labelText, lx, ly+rise);
     const lw=g.measureText(labelText).width;
+    if(TL.bgOn){
+      const px=lfs*.9, py=lfs*.55;
+      g.shadowBlur=0;
+      g.fillStyle=hexA(TL.bg,.82);
+      roundRect(g, lx-lw/2-px, ly-lfs*.95+rise-py, lw+px*2, lfs*1.25+py*2, Math.min(lfs*.5,(lfs*1.25+py*2)/2));
+      g.fill();
+      if(state.shadowOn) g.shadowBlur=w*.006;
+    }
+    g.fillStyle=hexA(lCol,.85);
+    g.fillText(labelText, lx, ly+rise);
     try{ g.letterSpacing='0em'; }catch(e){}
     g.shadowBlur=0;
-    g.fillStyle=hexA(state.titleColor,.3);
-    g.fillRect(lx-w*.014, ly+labelFs*1.5+rise, w*.028, Math.max(1.5,h*.0015));
+    if(!TL.bgOn){
+      g.fillStyle=hexA(lCol,.3);
+      g.fillRect(lx-w*.014, ly+lfs*1.5+rise, w*.028, Math.max(1.5,h*.0015));
+    }
     if(state.shadowOn) g.shadowBlur=w*.006;
-    if(R.preview) HIT.push({id:'label', x:lx-lw/2-w*.01, y:ly-labelFs*1.2, w:lw+w*.02, h:labelFs*3});
+    if(R.preview) HIT.push({id:'label', x:lx-lw/2-w*.01, y:ly-lfs*1.2, w:lw+w*.02, h:lfs*3});
   }
 
   g.fillStyle=state.titleColor;
@@ -4915,9 +4979,137 @@ function drawMediaClip(c,t,fx,p){
   if(R.preview) HIT.push({id:'mc:'+c.id, x:cx-dw/2, y:cy-dh/2, w:dw, h:dh});
 }
 
+/* ───────── LP 레코드 템플릿 (vintage 턴테이블 SVG 3레이어) ───────── */
+/* SVG 좌표계: viewBox 0 0 1280 720 · 판 중심 (472,334) · 톤암 피벗 (1046,143) */
+const LP_GEO={vbW:1280, vbH:720, discX:472, discY:334, pivotX:1046, pivotY:143, labelR:88};
+let lpImgs=null, lpLoad=null, lpFailed=false;
+function ensureLP(){
+  if(lpLoad) return lpLoad;
+  lpLoad=(async()=>{
+    try{
+      const txt=await fetch('turntable.svg',{cache:'force-cache'}).then(r=>{ if(!r.ok) throw 0; return r.text(); });
+      const svg=new DOMParser().parseFromString(txt,'image/svg+xml').documentElement;
+      if(svg.querySelector('parsererror')) throw 0;
+      const defs=svg.querySelector('defs');
+      /* 레이어 = 같은 viewBox의 <svg>에 defs + 지정 노드만 담아 좌표를 보존 */
+      const layer=(nodes)=>{
+        const s=svg.cloneNode(false);              /* <svg> 속성만 복사 */
+        s.setAttribute('width', LP_GEO.vbW*2); s.setAttribute('height', LP_GEO.vbH*2);
+        if(defs) s.appendChild(defs.cloneNode(true));
+        nodes.forEach(n=>n&&s.appendChild(n.cloneNode(true)));
+        const uri='data:image/svg+xml,'+encodeURIComponent(new XMLSerializer().serializeToString(s));
+        const img=new Image(); img.src=uri; return img;
+      };
+      /* base = 판·톤암을 뺀 나머지 전부 (본체·플래터·컨트롤 패널) */
+      const baseSvg=svg.cloneNode(true);
+      baseSvg.querySelectorAll('#record-rotor,#tonearm-rotor').forEach(n=>n.remove());
+      baseSvg.setAttribute('width', LP_GEO.vbW*2); baseSvg.setAttribute('height', LP_GEO.vbH*2);
+      const baseImg=new Image();
+      baseImg.src='data:image/svg+xml,'+encodeURIComponent(new XMLSerializer().serializeToString(baseSvg));
+      const discImg=layer([svg.querySelector('#record-rotor')]);
+      const armImg =layer([svg.querySelector('#tonearm-rotor')]);
+      await Promise.all([baseImg,discImg,armImg].map(im=>im.decode?im.decode().catch(()=>{}):
+        new Promise(r=>{ im.onload=im.onerror=r; })));
+      lpImgs={base:baseImg, disc:discImg, arm:armImg};
+    }catch(e){ lpFailed=true; }
+  })();
+  return lpLoad;
+}
+function drawLP(t, c, idx, cs, a){
+  const {g,w,h}=R;
+  const title=c.title||(a?a.name:'');
+  if(!lpImgs){
+    if(!lpFailed) ensureLP().then(()=>{ if(!state.playing&&!state.rendering) drawNow(); });
+    drawLPFallback(t,c,idx,cs,title); return;
+  }
+  const AR=LP_GEO.vbH/LP_GEO.vbW;
+  const el=state.el.lp||(state.el.lp={x:.5,y:.44,scale:1});
+  const destW=w*.64*(el.scale||1), destH=destW*AR;
+  const sx=destW/LP_GEO.vbW;                          /* 종횡비 보존 → sx=sy */
+  const dcx0=el.x*w, dcy=el.y*h;                       /* 판 중심 앵커 */
+  const destX=dcx0-LP_GEO.discX*sx, destY=dcy-LP_GEO.discY*sx;
+  const map=(px,py)=>[destX+px*sx, destY+py*sx];
+
+  const lt=Math.max(0,t-c.start), rem=Math.max(0,clipEnd(c)-t);
+  const dur=Math.max(.001, clipEnd(c)-c.start);
+  const prog=clamp(lt/dur,0,1);
+  const eOut=p=>{ p=clamp(p,0,1); return 1-Math.pow(1-p,3); };
+  const eIn =p=>{ p=clamp(p,0,1); return p*p*p; };
+  const IN=1.4, OUT=1.2, hasNext=idx<cs.length-1;
+
+  /* 판만 슬라이드(레코드 교체 연출) — 본체·톤암은 고정 */
+  let discDX=0;
+  if(lt<IN) discDX = -(1-eOut(lt/.8))*destW*1.15;
+  if(hasNext && rem<OUT) discDX = eIn((1-rem/OUT-.3)/.7)*destW*1.15;
+
+  /* 톤암: 피벗 기준 회전각(도) + 리프트(0=착지,1=들림) */
+  const baseAng=15+9*prog;                            /* 재생 중 바깥→안쪽 드리프트 */
+  let ang=baseAng, lift=0;
+  if(lt<IN){ const td=eOut((lt-.5)/.85); ang=baseAng*td; lift=1-td; }   /* 안착 */
+  if(hasNext && rem<OUT){ const rt=eOut((1-rem/OUT-.1)/.55); ang=baseAng*(1-rt); lift=Math.max(lift,rt); } /* 들기 */
+
+  const spin=t*3.49;                                  /* 33⅓ RPM */
+  g.save();
+  /* 본체 (플래터 포함 — 판이 빠지면 플래터가 드러남) */
+  g.drawImage(lpImgs.base, destX, destY, destW, destH);
+  /* 회전하는 판 */
+  const dcx=dcx0+discDX;
+  g.save(); g.translate(dcx,dcy); g.rotate(spin); g.translate(-dcx,-dcy);
+  g.drawImage(lpImgs.disc, destX+discDX, destY, destW, destH);
+  g.restore();
+  /* 라벨 위 제목(수평 고정) */
+  if(state.showTitle) drawLPTitle(g, dcx, dcy, LP_GEO.labelR*sx, title, idx, cs.length);
+  /* 톤암 (피벗 회전 + 화면상 리프트) */
+  const [pvx,pvy]=map(LP_GEO.pivotX, LP_GEO.pivotY);
+  g.save();
+  g.translate(0,-lift*24*sx);
+  g.translate(pvx,pvy); g.rotate(ang*Math.PI/180); g.translate(-pvx,-pvy);
+  g.drawImage(lpImgs.arm, destX, destY, destW, destH);
+  g.restore();
+  g.restore();
+  if(R.preview) HIT.push({id:'lp', x:destX+Math.min(0,discDX), y:destY, w:destW+Math.abs(discDX), h:destH});
+}
+/* 라벨 중앙 제목 — 판과 함께 좌우 이동하되 수평 유지 */
+function drawLPTitle(g, cx, cy, R0, title, idx, total){
+  g.save();
+  g.textAlign='center'; g.textBaseline='alphabetic';
+  const ink='#2a1d10', sub='#5a4326';
+  const F=state.font;
+  let fs=Math.round(R0*.32*F.mul*state.titleScale);
+  const setF=()=>g.font=`${F.weight} ${fs}px ${F.fam},'Noto Sans KR',sans-serif`;
+  setF();
+  while(g.measureText(title||' ').width>R0*1.5 && fs>8){ fs-=1; setF(); }
+  g.fillStyle=ink;
+  g.fillText(title||' ', cx, cy-R0*.24);
+  g.strokeStyle=hexA(sub,.55); g.lineWidth=Math.max(1,R0*.014);
+  g.beginPath(); g.moveTo(cx-R0*.42,cy+R0*.10); g.lineTo(cx+R0*.42,cy+R0*.10); g.stroke();
+  if(state.trackLabel.show){
+    g.font=`600 ${Math.round(R0*.17)}px 'Noto Sans KR',sans-serif`;
+    g.fillStyle=hexA(sub,.9);
+    g.fillText(`TRACK ${String(idx+1).padStart(2,'0')} / ${String(total).padStart(2,'0')}`, cx, cy+R0*.40);
+  }
+  g.font=`600 ${Math.round(R0*.12)}px 'Noto Sans KR',sans-serif`;
+  g.fillStyle=hexA(sub,.6);
+  g.fillText('33⅓ RPM · STEREO', cx, cy+R0*.62);
+  g.restore();
+}
+/* SVG 로딩 전/실패 시의 간단한 대체 렌더 */
+function drawLPFallback(t,c,idx,cs,title){
+  const {g,w,h}=R, m=Math.min(w,h);
+  const el=state.el.lp||(state.el.lp={x:.5,y:.44,scale:1});
+  const RD=m*.26*(el.scale||1), cx=el.x*w, cy=el.y*h, labelR=RD*.365;
+  g.save();
+  g.fillStyle='#111'; g.beginPath(); g.arc(cx,cy,RD,0,Math.PI*2); g.fill();
+  g.strokeStyle='rgba(255,255,255,.08)'; g.lineWidth=1;
+  for(let r=labelR*1.2;r<RD*.96;r+=RD*.03){ g.beginPath(); g.arc(cx,cy,r,0,Math.PI*2); g.stroke(); }
+  g.fillStyle='#d5bc82'; g.beginPath(); g.arc(cx,cy,labelR,0,Math.PI*2); g.fill();
+  if(state.showTitle) drawLPTitle(g, cx, cy, labelR, title, idx, cs.length);
+  g.restore();
+  if(R.preview) HIT.push({id:'lp', x:cx-RD, y:cy-RD, w:RD*2, h:RD*2});
+}
+
 /* 플레이리스트 제목/트랙번호/가사 */
 function drawPlaylistText(t){
-  if(!state.showTitle) return;
   const tr=plTrack(); if(!tr) return;
   const cs=sortedClips(tr); if(!cs.length) return;
   let idx=-1;
@@ -4925,9 +5117,13 @@ function drawPlaylistText(t){
   if(idx<0) idx=0;
   const c=cs[idx], a=A(c.assetId);
   const lt=Math.max(0,t-c.start), lMs=lt*1000;
-  state.titleShownAt=lMs<900? .0001 : 0;
-  drawTitle(c.title||(a?a.name:''), idx, cs.length, null, lMs<900? lMs+.0001 : null);
-  state.titleShownAt=0;
+  if(state.template==='lp'){
+    drawLP(t, c, idx, cs, a);
+  }else if(state.showTitle){
+    state.titleShownAt=lMs<900? .0001 : 0;
+    drawTitle(c.title||(a?a.name:''), idx, cs.length, null, lMs<900? lMs+.0001 : null);
+    state.titleShownAt=0;
+  }
   if(c.lyrics&&c.lyrics.length&&t<clipEnd(c))
     drawLyrics({lyrics:c.lyrics}, c.in+lt*c.speed);
 }
@@ -5756,6 +5952,55 @@ $('waveRow').addEventListener('click',e=>{
   }
   drawNow();
 });
+/* 템플릿 (LP 레코드) */
+$('tplRow').addEventListener('click',e=>{
+  const b=e.target.closest('.chip'); if(!b) return;
+  [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
+  state.template=b.dataset.tp;
+  const lp=state.template==='lp';
+  $('lpOpts').style.display=lp?'':'none';
+  $('lpHint').style.display=lp?'':'none';
+  if(lp) ensureLP();
+  drawNow();
+});
+bindSlider('lpScale','lpScaleV',v=>{
+  if(!state.el.lp) state.el.lp={x:.5,y:.44,scale:1};
+  state.el.lp.scale=v/100;
+});
+/* 트랙 번호 라벨 */
+$('tlbShowBtn').addEventListener('click',e=>{
+  e.target.classList.toggle('on');
+  state.trackLabel.show=e.target.classList.contains('on'); drawNow();
+});
+$('tlbLinkBtn').addEventListener('click',e=>{
+  e.target.classList.toggle('on');
+  state.trackLabel.link=e.target.classList.contains('on'); drawNow();
+});
+$('tlbBgBtn').addEventListener('click',e=>{
+  e.target.classList.toggle('on');
+  state.trackLabel.bgOn=e.target.classList.contains('on'); drawNow();
+});
+$('tlbColor').addEventListener('input',e=>{
+  state.trackLabel.color=e.target.value;
+  state.trackLabel.link=false; $('tlbLinkBtn').classList.remove('on');
+  drawNow();
+});
+$('tlbBgColor').addEventListener('input',e=>{
+  state.trackLabel.bg=e.target.value;
+  state.trackLabel.bgOn=true; $('tlbBgBtn').classList.add('on');
+  drawNow();
+});
+{
+  const sel=$('tlbFontSel');
+  const o0=document.createElement('option'); o0.value=-1; o0.textContent='기본 (고딕 얇게)'; sel.appendChild(o0);
+  FONTS.forEach((f,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=f.n; sel.appendChild(o); });
+  sel.addEventListener('change',()=>{
+    state.trackLabel.fontIdx=+sel.value;
+    if(+sel.value>=0)
+      document.fonts.load(`${FONTS[+sel.value].weight} 40px ${FONTS[+sel.value].fam}`,'가나다 Ag01').then(drawNow);
+    drawNow();
+  });
+}
 document.querySelectorAll('.grp-h').forEach(h=>{
   h.addEventListener('click',()=>h.parentElement.classList.toggle('open'));
 });
@@ -5835,14 +6080,20 @@ async function startExport(){
     offerRealtime('이 브라우저는 고속 렌더(WebCodecs)를 지원하지 않습니다.'); return;
   }
   const W=exp.w*exp.scale, H=exp.h*exp.scale, FPS=exp.fps;
-  /* 코덱 확인 */
+  /* 코덱 확인 — 속도 우선: realtime 모드 + 하드웨어 인코더 우선 선택 */
   const vCfg={codec:(W>=3840||H>=2160)?'avc1.640033':'avc1.64002A',
-    width:W,height:H,bitrate:Math.round(W*H*(FPS===60?3.4:2.8)),framerate:FPS,latencyMode:'quality'};
-  const vOk=await VideoEncoder.isConfigSupported(vCfg).catch(()=>({supported:false}));
-  if(!vOk.supported){
-    vCfg.hardwareAcceleration='prefer-software';
-    const v2=await VideoEncoder.isConfigSupported(vCfg).catch(()=>({supported:false}));
-    if(!v2.supported){ offerRealtime('이 해상도의 H.264 인코딩을 지원하지 않습니다.'); return; }
+    width:W,height:H,bitrate:Math.round(W*H*(FPS===60?3.4:2.8)),framerate:FPS,
+    latencyMode:'realtime'};
+  /* 가장 빠른(하드웨어) 경로부터 순서대로 지원 여부 확인 */
+  {
+    let chosen=null;
+    for(const acc of ['prefer-hardware', null, 'prefer-software']){
+      const probe={...vCfg}; if(acc) probe.hardwareAcceleration=acc; else delete probe.hardwareAcceleration;
+      const ok=await VideoEncoder.isConfigSupported(probe).catch(()=>({supported:false}));
+      if(ok.supported){ chosen=probe; break; }
+    }
+    if(!chosen){ offerRealtime('이 해상도의 H.264 인코딩을 지원하지 않습니다.'); return; }
+    Object.assign(vCfg, chosen);
   }
   const aCfg={codec:'mp4a.40.2',sampleRate:48000,numberOfChannels:2,bitrate:192000,aac:{format:'aac'}};
   const aOk=await AudioEncoder.isConfigSupported(aCfg).catch(()=>({supported:false}));
@@ -5870,6 +6121,7 @@ async function startExport(){
     document.fonts.load(`${FONTS[state.subStyle.fontIdx].weight} 60px ${FONTS[state.subStyle.fontIdx].fam}`,'가나다'),
     document.fonts.load(`500 30px 'Noto Sans KR'`,'TRACK'),
   ]);}catch(e){}
+  if(state.template==='lp') await ensureLP();          /* LP 아트웍 래스터 준비 */
 
   state.rendering=true; state.cancelRender=false;
   $('exportBtn').disabled=true; $('playBtn').disabled=true;
@@ -5931,11 +6183,13 @@ async function startExport(){
     }
 
     /* ── 비디오 프레임 ── */
-    smoothVals.fill(0); peakVals.fill(0); magPrev.fill(0); bassSm=0;
+    smoothVals.fill(0); peakVals.fill(0); magPrev.fill(0); bassSm=0; agcGain=1; agcTGain=1;
     pauseAllVideos();
     const totalFrames=Math.ceil(dur*FPS);
     const hasVideoClips=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
     const specSrc={buffer:mixed};
+    /* 인코더 큐를 깊게 유지해 그리기와 인코딩이 겹쳐 돌게 함 (해상도에 따라 메모리 상한 조정) */
+    const QMAX=(W*H>=3840*2160)?6 : (W*H>=1920*1080?24:40);
     for(let f=0;f<totalFrames;f++){
       if(state.cancelRender||encErr) break;
       const t=f/FPS;
@@ -5944,7 +6198,8 @@ async function startExport(){
       drawFrame(t, true, rg, W, H, false);
       const vf=new VideoFrame(rcanvas,{timestamp:Math.round(f*1e6/FPS),duration:Math.round(1e6/FPS)});
       vEnc.encode(vf,{keyFrame:f%(FPS*2)===0}); vf.close();
-      if(vEnc.encodeQueueSize>8) await withTimeout(new Promise(r=>setTimeout(r,16)),8000,'video backpressure timeout');
+      while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr)
+        await withTimeout(new Promise(r=>setTimeout(r,3)),8000,'video backpressure timeout');
       if(f%15===0){
         const pct=f/totalFrames, spd=(f/FPS)/((performance.now()-t0)/1000);
         const eta=spd>0?(dur-f/FPS)/spd:0;
@@ -6074,6 +6329,7 @@ function snapshotSettings(){
     glow:state.glow, shadowOn:state.shadowOn, vignette:state.vignette,
     titleScale:state.titleScale, showTitle:state.showTitle,
     fontIdx:Math.max(0,FONTS.indexOf(state.font)),
+    template:state.template, trackLabel:{...state.trackLabel},
     progressBar:{...state.progressBar} };
 }
 function applySettings(s){
@@ -6085,6 +6341,9 @@ function applySettings(s){
   if(s.logo) Object.assign(state.logo,{show:s.logo.show, x:s.logo.x, y:s.logo.y, scale:s.logo.scale,
     opacity:s.logo.opacity, bright:s.logo.bright!=null?s.logo.bright:1, con:s.logo.con!=null?s.logo.con:1});
   state.wave=s.wave; state.el=JSON.parse(JSON.stringify(s.el));
+  if(!state.el.lp) state.el.lp={x:.5,y:.44,scale:1};
+  state.template=s.template||'none';
+  if(s.trackLabel) Object.assign(state.trackLabel, s.trackLabel);
   state.waveColor=s.waveColor; state.titleColor=s.titleColor;
   state.glow=s.glow; state.shadowOn=s.shadowOn; state.vignette=s.vignette;
   state.titleScale=s.titleScale; state.showTitle=s.showTitle!==false;
@@ -6099,6 +6358,15 @@ function syncUIFromState(){
   pick('ambRow',c=>c.dataset.am===state.ambient);
   pick('waveRow',c=>c.dataset.wv===state.wave);
   pick('fontRow',c=>+c.dataset.f===FONTS.indexOf(state.font));
+  pick('tplRow',c=>c.dataset.tp===(state.template||'none'));
+  $('lpOpts').style.display=state.template==='lp'?'':'none';
+  $('lpHint').style.display=state.template==='lp'?'':'none';
+  const TL=state.trackLabel;
+  $('tlbShowBtn').classList.toggle('on',TL.show);
+  $('tlbLinkBtn').classList.toggle('on',TL.link);
+  $('tlbBgBtn').classList.toggle('on',TL.bgOn);
+  $('tlbColor').value=TL.color; $('tlbBgColor').value=TL.bg;
+  $('tlbFontSel').value=TL.fontIdx;
   pick('subTplRow',c=>c.dataset.tpl===state.subStyle.template);
   [...$('fxRow').children].forEach(c=>{ const fx=c.dataset.fx;
     if(fx.startsWith('glow')) c.classList.toggle('on', +fx.slice(4)===state.glow);
@@ -6128,6 +6396,7 @@ function syncUIFromState(){
   setS('waveY','waveYV',Math.round(state.el.wave.y*100));
   setS('waveSW','waveSWV',Math.round(state.el.wave.sw*100));
   setS('waveSH','waveSHV',Math.round(state.el.wave.sh*100));
+  setS('lpScale','lpScaleV',Math.round((state.el.lp?state.el.lp.scale||1:1)*100));
   setS('subSize','subSizeV',Math.round(state.subStyle.size*100));
   setS('subY','subYV',Math.round(state.subStyle.y*100));
   $('titleColor').value=state.titleColor; $('waveColor').value=state.waveColor;
