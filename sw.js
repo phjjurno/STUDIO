@@ -1,6 +1,6 @@
 /* PULSEORIGN STUDIO — Service Worker v3 */
-const CACHE = 'pulseorign-v10';
-const SHELL = ['./index.html', './manifest.json', './deck.jpg', './vinyl.png', './arm.png', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'pulseorign-v11';
+const SHELL = ['./index.html', './manifest.json', './vinyl.png', './arm.png', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
