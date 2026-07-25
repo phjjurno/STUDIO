@@ -2919,16 +2919,22 @@ function playSnippet(a, at, dur=2){
 function startDragReorder(e, idx){
   if(state.playing||state.rendering) return;
   e.preventDefault();
+  try{ e.target.setPointerCapture&&e.target.setPointerCapture(e.pointerId); }catch(_){}
+  const list=$('tracklist');
   let cur=idx;
-  const mark=()=>{ document.querySelectorAll('.track-wrap').forEach(w=>
-    w.classList.toggle('dragme', +w.dataset.idx===cur)); };
+  const rows=()=>[...list.querySelectorAll('.track-wrap')];
+  const mark=()=>rows().forEach(w=>w.classList.toggle('dragme', +w.dataset.idx===cur));
   mark();
+  /* 포인터 Y를 각 행의 중앙과 비교해 목표 인덱스 계산 (elementFromPoint보다 견고) */
+  const targetIdx=y=>{
+    const rs=rows(); let t=rs.length-1;
+    for(let k=0;k<rs.length;k++){ const r=rs[k].getBoundingClientRect();
+      if(y < r.top + r.height/2){ t=k; break; } }
+    return t;
+  };
   const move=ev=>{
-    const el=document.elementFromPoint(ev.clientX, ev.clientY);
-    const wrap=el&&el.closest? el.closest('.track-wrap'):null;
-    if(!wrap) return;
-    const t=+wrap.dataset.idx;
-    if(!Number.isNaN(t)&&t!==cur){
+    const t=targetIdx(ev.clientY);
+    if(t!==cur && t>=0){
       const tr=plTrack(); const cs=plClips();
       const [item]=cs.splice(cur,1); cs.splice(t,0,item);
       tr.clips=cs; plRepack(); cur=t;
@@ -2939,7 +2945,7 @@ function startDragReorder(e, idx){
     document.removeEventListener('pointermove',move);
     document.removeEventListener('pointerup',up);
     document.removeEventListener('pointercancel',up);
-    document.querySelectorAll('.track-wrap').forEach(w=>w.classList.remove('dragme'));
+    rows().forEach(w=>w.classList.remove('dragme'));
     renderTL(); drawNow();
   };
   document.addEventListener('pointermove',move);
