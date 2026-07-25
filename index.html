@@ -2611,7 +2611,7 @@ const state = {
   el:{ wave:{x:.5,y:.74,sw:1,sh:1}, title:{x:.5,y:0,custom:false},
        label:{x:.5,y:0,custom:false}, lyrics:{x:.5,y:.84,custom:false},
        lp:{x:.5,y:.5,scale:1} },
-  template:'none', lpTonearm:false,
+  template:'none', lpTonearm:true,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
   waveColor:'#FFFFFF', titleColor:'#FFFFFF',
   glow:1, shadowOn:true, vignette:true, titleScale:1, showTitle:true,
@@ -2900,8 +2900,10 @@ function plAppend(assetId){
 }
 function plRepack(){
   const tr=plTrack(); if(!tr) return;
-  const cs=sortedClips(tr); let acc=0;
-  for(const c of cs){ c.start=acc; acc+=c.dur; }
+  /* 재생목록 순서는 tr.clips 배열 순서가 기준 — start는 순서대로 재계산
+     (sortedClips로 정렬하면 방금 바꾼 순서가 옛 start값으로 되돌아감) */
+  let acc=0;
+  for(const c of tr.clips){ c.start=acc; acc+=c.dur; }
 }
 let snippetSrc=null;
 function stopSnippet(){ try{ snippetSrc&&snippetSrc.stop(); }catch(e){} snippetSrc=null; }
@@ -5192,114 +5194,135 @@ function drawMediaClip(c,t,fx,p){
   if(R.preview) HIT.push({id:'mc:'+c.id, x:cx-dw/2, y:cy-dh/2, w:dw, h:dh});
 }
 
-/* ───────── LP 레코드 템플릿 (실사 사진: deck + 회전 vinyl + 움직이는 tonearm) ───────── */
-/* deck 정규좌표: 플래터 중심 (0.399,0.483) · 레코드 반경 0.335W · 라벨/레코드 비 0.393 */
-const LP_DECK={platX:0.399, platY:0.483, recR:0.335, labelRatio:0.393};
-/* 톤암 스프라이트: deck 정규좌표 배치 rect + 피벗 + 재생 시 회전각(도) */
-const LP_ARM={x0:0.6567, y0:0.0382, x1:0.9341, y1:0.8931, pvx:0.8203, pvy:0.2133, playDeg:41.5};
-let lpDeck=null, lpVinyl=null, lpArm=null, lpLoad=null, lpFailed=false;
-function ensureLP(){
-  if(lpLoad) return lpLoad;
-  lpLoad=(async()=>{
-    try{
-      const load=src=>new Promise((res,rej)=>{ const im=new Image();
-        im.onload=()=>res(im); im.onerror=rej; im.src=src; });
-      const [v,arm]=await Promise.all([load('vinyl.png'), load('arm.png')]);
-      lpVinyl=v; lpArm=arm;
-    }catch(e){ lpFailed=true; }
-  })();
-  return lpLoad;
-}
+/* ───────── LP 레코드 템플릿 (깔끔한 벡터: 회전 레코드 + 벡터 톤암 세트) ───────── */
+function ensureLP(){ return Promise.resolve(); }   /* 벡터 렌더 — 로딩 불필요 (호환용 no-op) */
 function drawLP(t, c, idx, cs, a){
   const {g,w,h}=R, m=Math.min(w,h);
   const title=c.title||(a?a.name:'');
-  if(!lpVinyl||(state.lpTonearm&&!lpArm)){
-    if(!lpFailed) ensureLP().then(()=>{ if(!state.playing&&!state.rendering) drawNow(); });
-    drawLPFallback(t,c,idx,cs,title); return;
-  }
   const el=state.el.lp||(state.el.lp={x:.5,y:.5,scale:1});
-  /* 배경 사진 위에 얹는 레코드 — 프레임을 덮지 않고 요소로 배치 */
-  const recR=m*.30*(el.scale||1);
-  const pcx=(el.x!=null?el.x:.5)*w, pcy=(el.y!=null?el.y:.5)*h;
+  const cx=(el.x!=null?el.x:.5)*w, cy=(el.y!=null?el.y:.5)*h;
+  const R0=m*.28*(el.scale||1);                       /* 레코드 반경 — 이 값 하나로 세트 전체 스케일 */
 
   const lt=Math.max(0,t-c.start), rem=Math.max(0,clipEnd(c)-t);
   const dur=Math.max(.001, clipEnd(c)-c.start);
   const eOut=p=>{ p=clamp(p,0,1); return 1-Math.pow(1-p,3); };
   const IN=1.0, OUT=0.8, hasNext=idx<cs.length-1;
-
-  /* 곡 전환 연출: 페이드 + 살짝 확대 */
   let recA=1, recS=1;
   if(lt<IN){ const p=eOut(lt/IN); recA=p; recS=.94+.06*p; }
   if(hasNext && rem<OUT){ const p=eOut(1-rem/OUT); recA=1-p; recS=1-.05*p; }
-
-  const spin=t*3.49;                                  /* 33⅓ RPM */
   if(recA<=.01) return;
-  const rr=recR*recS;
+
+  const spin=t*3.49, rr=R0*recS, labelR=rr*.36;
+  const LC=state.titleColor||'#ffffff';
+  const ln=parseInt(LC.slice(1),16);
+  const lum=(0.299*(ln>>16&255)+0.587*(ln>>8&255)+0.114*(ln&255))/255;
+
   g.save();
   g.globalAlpha=recA;
-  /* 바닥 그림자 — 배경 위에 자연스럽게 안착 */
-  const sh=g.createRadialGradient(pcx,pcy+rr*.06,rr*.35, pcx,pcy+rr*.1,rr*1.18);
-  sh.addColorStop(0,'rgba(0,0,0,.36)'); sh.addColorStop(.72,'rgba(0,0,0,.2)'); sh.addColorStop(1,'rgba(0,0,0,0)');
-  g.fillStyle=sh;
-  g.beginPath(); g.ellipse(pcx,pcy+rr*.09,rr*1.14,rr*1.08,0,0,Math.PI*2); g.fill();
-  /* 회전하는 레코드 */
+  /* 테이블 접지 그림자 — 세트가 바닥에 놓인 느낌 */
+  const sh=g.createRadialGradient(cx,cy+rr*.14,rr*.4, cx,cy+rr*.2,rr*1.5);
+  sh.addColorStop(0,'rgba(0,0,0,.32)'); sh.addColorStop(.7,'rgba(0,0,0,.14)'); sh.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=sh; g.beginPath(); g.ellipse(cx,cy+rr*.18,rr*1.5,rr*1.12,0,0,Math.PI*2); g.fill();
+  /* 슬립매트 (레코드보다 살짝 큰 펠트) — 테이블 위 받침 */
+  const matR=rr*1.13;
+  const mg=g.createRadialGradient(cx-matR*.28,cy-matR*.28,matR*.15, cx,cy,matR);
+  mg.addColorStop(0,'#34343a'); mg.addColorStop(1,'#1e1e22');
+  g.fillStyle=mg; g.beginPath(); g.arc(cx,cy,matR,0,Math.PI*2); g.fill();
+  g.strokeStyle='rgba(0,0,0,.45)'; g.lineWidth=Math.max(1,rr*.008);
+  g.beginPath(); g.arc(cx,cy,matR,0,Math.PI*2); g.stroke();
+
+  /* ── 비닐 레코드 (회전) ── */
   g.save();
-  g.translate(pcx,pcy); g.rotate(spin); g.translate(-pcx,-pcy);
-  g.drawImage(lpVinyl, pcx-rr, pcy-rr, rr*2, rr*2);
+  g.translate(cx,cy); g.rotate(spin); g.translate(-cx,-cy);
+  const vg=g.createRadialGradient(cx-rr*.32,cy-rr*.32,rr*.08, cx,cy,rr);
+  vg.addColorStop(0,'#26262b'); vg.addColorStop(.55,'#131316'); vg.addColorStop(1,'#08080a');
+  g.fillStyle=vg; g.beginPath(); g.arc(cx,cy,rr,0,Math.PI*2); g.fill();
+  /* 그루브 */
+  g.lineWidth=Math.max(.5,rr*.0035);
+  for(let r=labelR*1.1;r<rr*.965;r+=rr*.02){
+    g.strokeStyle=`rgba(255,255,255,${.028+.018*Math.sin(r*.35)})`;
+    g.beginPath(); g.arc(cx,cy,r,0,Math.PI*2); g.stroke();
+  }
+  /* 트랙 구분 링 (조금 더 밝게) */
+  g.strokeStyle='rgba(255,255,255,.08)'; g.lineWidth=Math.max(1,rr*.006);
+  for(const fr of [.55,.72,.88]){ g.beginPath(); g.arc(cx,cy,labelR*1.1+(rr*.85-labelR*1.1)*fr,0,Math.PI*2); g.stroke(); }
   g.restore();
-  /* 회전 광택 */
+
+  /* 회전 광택 (스핀 강조) */
   g.save();
-  g.beginPath(); g.arc(pcx,pcy,rr*.98,0,Math.PI*2); g.clip();
+  g.beginPath(); g.arc(cx,cy,rr*.965,0,Math.PI*2); g.clip();
   g.globalCompositeOperation='lighter';
-  g.translate(pcx,pcy); g.rotate(spin*.6);
-  const sg=g.createLinearGradient(-rr,0,rr,0);
-  sg.addColorStop(0,'rgba(255,255,255,0)'); sg.addColorStop(.5,'rgba(255,255,255,.07)'); sg.addColorStop(1,'rgba(255,255,255,0)');
-  g.fillStyle=sg; g.fillRect(-rr,-rr,rr*2,rr*2);
+  g.translate(cx,cy); g.rotate(spin*.5);
+  const gsg=g.createLinearGradient(-rr,0,rr,0);
+  gsg.addColorStop(0,'rgba(255,255,255,0)'); gsg.addColorStop(.5,'rgba(255,255,255,.05)'); gsg.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=gsg; g.fillRect(-rr,-rr,rr*2,rr*2);
   g.restore();
-  /* 라벨 위 제목 — LP와 함께 회전 */
-  if(state.showTitle){
-    g.save();
-    g.translate(pcx,pcy); g.rotate(spin); g.translate(-pcx,-pcy);
-    drawLPTitle(g, pcx, pcy, rr*LP_DECK.labelRatio, title, idx, cs.length);
-    g.restore();
-  }
-  /* 톤암 (선택) — 우상단에서 레코드 위로 내려옴 */
-  if(state.lpTonearm && lpArm){
+
+  /* ── 라벨 + 제목 (레코드와 함께 회전) ── */
+  g.save();
+  g.translate(cx,cy); g.rotate(spin); g.translate(-cx,-cy);
+  const lg=g.createRadialGradient(cx-labelR*.3,cy-labelR*.3,labelR*.1, cx,cy,labelR);
+  lg.addColorStop(0,LC); lg.addColorStop(1,hexA(LC,.86));
+  g.fillStyle=lg; g.beginPath(); g.arc(cx,cy,labelR,0,Math.PI*2); g.fill();
+  const rc=lum>.55?'rgba(0,0,0,':'rgba(255,255,255,';
+  g.strokeStyle=rc+'.18)'; g.lineWidth=Math.max(1,rr*.004);
+  g.beginPath(); g.arc(cx,cy,labelR*.9,0,Math.PI*2); g.stroke();
+  if(state.showTitle) drawLPTitle(g, cx, cy, labelR, title, idx, cs.length, lum>.55);
+  /* 스핀들 */
+  g.fillStyle=lum>.55?'#2a2a2a':'#d8d8d8'; g.beginPath(); g.arc(cx,cy,rr*.02,0,Math.PI*2); g.fill();
+  g.restore();
+
+  /* ── 벡터 톤암 (선택) — 레코드 크기에 비례, 세트로 함께 스케일 ── */
+  if(state.lpTonearm){
     const IN_ARM=1.3, OUT_ARM=1.0;
-    let armFrac=1;
-    if(lt<IN_ARM) armFrac=eOut(lt/IN_ARM);
-    if(rem<OUT_ARM) armFrac=Math.min(armFrac, eOut(rem/OUT_ARM));
-    const AR=lpArm.naturalWidth/lpArm.naturalHeight;
-    const AW=rr*1.9, AH=AW/AR;                          /* 레코드 크기에 맞춘 톤암 */
-    const pvxN=0.5882, pvyN=0.2069;                     /* arm.png 내 피벗 위치 */
-    const P={x:pcx+rr*0.95, y:pcy-rr*0.62};             /* 피벗을 레코드 우상단 밖에 */
-    const armX=P.x-pvxN*AW, armY=P.y-pvyN*AH;
-    const playDeg=-28, armDeg=playDeg*armFrac;          /* 재생 시 판 위로 스윙 */
-    const armLift=(1-armFrac)*rr*.10;
-    g.save();
-    g.translate(0,-armLift);
-    g.translate(P.x,P.y); g.rotate(armDeg*Math.PI/180); g.translate(-P.x,-P.y);
-    g.drawImage(lpArm, armX, armY, AW, AH);
+    let af=1;
+    if(lt<IN_ARM) af=eOut(lt/IN_ARM);
+    if(rem<OUT_ARM) af=Math.min(af, eOut(rem/OUT_ARM));
+    const P={x:cx+rr*1.0, y:cy-rr*.86};                /* 피벗: 레코드 우상단 밖(테이블 위) */
+    const Nrest={x:cx+rr*1.06, y:cy+rr*.2};            /* 대기: 레코드 밖 오른쪽 */
+    const aP=-0.62, Nplay={x:cx+Math.cos(aP)*rr*.72, y:cy+Math.sin(aP)*rr*.72};  /* 재생: 판 우상단 그루브 */
+    const lift=(1-af)*rr*.06;
+    const N={x:Nrest.x+(Nplay.x-Nrest.x)*af, y:Nrest.y+(Nplay.y-Nrest.y)*af-lift};
+    const ang=Math.atan2(N.y-P.y,N.x-P.x);
+    const aw=Math.max(2,rr*.026);
+    /* 암 그림자 */
+    g.strokeStyle='rgba(0,0,0,.2)'; g.lineWidth=aw*1.15; g.lineCap='round';
+    g.beginPath(); g.moveTo(P.x+rr*.015,P.y+rr*.025); g.lineTo(N.x+rr*.015,N.y+rr*.025); g.stroke();
+    /* 카운터웨이트 (피벗 뒤쪽) */
+    const bx=P.x-Math.cos(ang)*rr*.17, by=P.y-Math.sin(ang)*rr*.17;
+    g.fillStyle='#2b2d33'; g.beginPath(); g.arc(bx,by,aw*1.5,0,Math.PI*2); g.fill();
+    /* 암 튜브 (크롬) */
+    g.strokeStyle='#c9ccd2'; g.lineWidth=aw; g.lineCap='round';
+    g.beginPath(); g.moveTo(P.x,P.y); g.lineTo(N.x,N.y); g.stroke();
+    g.strokeStyle='rgba(255,255,255,.5)'; g.lineWidth=aw*.32;
+    g.beginPath(); g.moveTo(P.x,P.y); g.lineTo(N.x,N.y); g.stroke();
+    /* 헤드셸 */
+    g.save(); g.translate(N.x,N.y); g.rotate(ang);
+    g.fillStyle='#26282e'; roundRect(g,-aw*1.1,-aw*1.3,aw*3,aw*2.6,aw*.5); g.fill();
+    g.fillStyle='#c9ccd2'; g.fillRect(aw*1.5,-aw*.2,aw*.5,aw*.9);
     g.restore();
+    /* 피벗 베이스 */
+    const pg=g.createRadialGradient(P.x-aw,P.y-aw,aw*.3, P.x,P.y,aw*2.5);
+    pg.addColorStop(0,'#e2e4e8'); pg.addColorStop(1,'#7c828b');
+    g.fillStyle=pg; g.beginPath(); g.arc(P.x,P.y,aw*2.5,0,Math.PI*2); g.fill();
+    g.fillStyle='#3a3d44'; g.beginPath(); g.arc(P.x,P.y,aw*.9,0,Math.PI*2); g.fill();
   }
   g.restore();
-  if(R.preview) HIT.push({id:'lp', x:pcx-recR, y:pcy-recR, w:recR*2, h:recR*2});
+  if(R.preview) HIT.push({id:'lp', x:cx-rr, y:cy-rr, w:rr*2, h:rr*2});
 }
-/* 레코드 라벨 중앙 제목 — 판과 함께 움직이되 수평 유지 */
-function drawLPTitle(g, cx, cy, R0, title, idx, total){
+/* 레코드 라벨 중앙 제목 — 판과 함께 회전, 라벨 밝기에 따라 글자색 자동 */
+function drawLPTitle(g, cx, cy, R0, title, idx, total, darkText){
   g.save();
   g.textAlign='center'; g.textBaseline='alphabetic';
-  const ink='#2a2119', sub='#4a3d2e';
+  const ink=darkText?'#241c12':'#f3efe6', sub=darkText?'#4a3d2e':'#d8cfbf';
   const F=state.font;
   let fs=Math.round(R0*.30*F.mul*state.titleScale);
   const setF=()=>g.font=`${F.weight} ${fs}px ${F.fam},'Noto Sans KR',sans-serif`;
   setF();
   while(g.measureText(title||' ').width>R0*1.5 && fs>8){ fs-=1; setF(); }
-  if(state.shadowOn){ g.shadowColor='rgba(255,250,240,.5)'; g.shadowBlur=R0*.06; }
   g.fillStyle=ink;
   g.fillText(title||' ', cx, cy-R0*.22);
-  g.shadowBlur=0;
-  g.strokeStyle=hexA(sub,.5); g.lineWidth=Math.max(1,R0*.012);
+  g.strokeStyle=hexA(sub,.55); g.lineWidth=Math.max(1,R0*.012);
   g.beginPath(); g.moveTo(cx-R0*.40,cy+R0*.06); g.lineTo(cx+R0*.40,cy+R0*.06); g.stroke();
   if(state.trackLabel.show){
     g.font=`600 ${Math.round(R0*.16)}px 'Noto Sans KR',sans-serif`;
@@ -5311,20 +5334,7 @@ function drawLPTitle(g, cx, cy, R0, title, idx, total){
   g.fillText('33⅓ RPM · STEREO', cx, cy+R0*.54);
   g.restore();
 }
-/* 로딩 전/실패 시 대체 렌더 */
-function drawLPFallback(t,c,idx,cs,title){
-  const {g,w,h}=R, m=Math.min(w,h);
-  const el=state.el.lp||(state.el.lp={x:.5,y:.5,scale:1});
-  const RD=m*.3*(el.scale||1), cx=(el.x!=null?el.x:.5)*w, cy=(el.y!=null?el.y:.5)*h, labelR=RD*.39;
-  g.save();
-  g.fillStyle='#0e0e0e'; g.beginPath(); g.arc(cx,cy,RD,0,Math.PI*2); g.fill();
-  g.strokeStyle='rgba(255,255,255,.07)'; g.lineWidth=1;
-  for(let r=labelR*1.15;r<RD*.96;r+=RD*.03){ g.beginPath(); g.arc(cx,cy,r,0,Math.PI*2); g.stroke(); }
-  g.fillStyle='#cdbb90'; g.beginPath(); g.arc(cx,cy,labelR,0,Math.PI*2); g.fill();
-  if(state.showTitle) drawLPTitle(g, cx, cy, labelR, title, idx, cs.length);
-  g.restore();
-  if(R.preview) HIT.push({id:'lp', x:cx-RD, y:cy-RD, w:RD*2, h:RD*2});
-}
+
 
 /* 플레이리스트 제목/트랙번호/가사 */
 function drawPlaylistText(t){
