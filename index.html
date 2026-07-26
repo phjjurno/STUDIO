@@ -4942,6 +4942,16 @@ async function mixAudio(sr, ch, dur){
   for(const c of audioClipsAll()) scheduleClip(off, off.destination, c, 0, 0);
   return off.startRendering();
 }
+/* 타임라인 [from,to] 구간만 믹싱 — 긴 영상에서 전체 버퍼 생성(메모리 초과) 방지 */
+async function mixAudioRange(sr, ch, from, to){
+  const len=Math.max(1, Math.ceil((to-from)*sr));
+  const off=new OfflineAudioContext(ch, len, sr);
+  for(const c of audioClipsAll()){
+    if(clipEnd(c)<=from || c.start>=to) continue;      /* 구간 밖 클립은 스킵 */
+    scheduleClip(off, off.destination, c, from, 0);
+  }
+  return off.startRendering();
+}
 
 function eachVideoClip(fn){
   for(const tr of state.tracks) if(tr.kind==='video')
@@ -6418,70 +6428,75 @@ async function startExport(){
   vEnc.configure(vCfg);
 
   const t0=performance.now();
-  let mixed=null;
   try{
-    /* ── 오디오: 타임라인 전체 믹스다운 → AAC ── */
-    setStatus('<span class="rec">⚡</span> 오디오 믹스다운 중…');
+    setStatus('<span class="rec">⚡</span> 인코딩 시작 — 오디오·영상을 구간별로 처리…');
     await yieldTask();
-    mixed=await mixAudio(48000, 2, dur);
+    /* AAC 인코더 (구간 루프 전 1회 생성) */
+    let aEnc=null;
+    const CHUNK=4096, plane=new Float32Array(CHUNK*2);
     if(hasAudio){
-      const aEnc=new AudioEncoder({
+      aEnc=new AudioEncoder({
         output:(chunk,meta)=>{muxer.addAudioChunk(chunk,meta); aPkts++;},
         error:e=>{encErr=e; console.error('aEnc',e);}
       });
       aEnc.configure(aCfg);
-      const CHUNK=4096, plane=new Float32Array(CHUNK*2);
-      const c0=mixed.getChannelData(0), c1=mixed.numberOfChannels>1? mixed.getChannelData(1):mixed.getChannelData(0);
-      const total=Math.min(mixed.length, Math.ceil(dur*48000));
-      let ts=0;
-      for(let k=0;k<total;k+=CHUNK){
-        if(state.cancelRender||encErr) break;
-        const n=Math.min(CHUNK,total-k);
-        plane.set(c0.subarray(k,k+n),0);
-        plane.set(c1.subarray(k,k+n),n);
-        const ad=new AudioData({format:'f32-planar',sampleRate:48000,numberOfFrames:n,
-          numberOfChannels:2,timestamp:Math.round(ts),data:plane.subarray(0,n*2)});
-        aEnc.encode(ad); ad.close();
-        ts+=n/48000*1e6;
-        if(aEnc.encodeQueueSize>24) await withTimeout(new Promise(r=>setTimeout(r,40)),3000,'audio flush timeout');
-        if(k%(CHUNK*16)===0) await yieldTask();
-      }
-      if(!state.cancelRender&&!encErr) await withTimeout(aEnc.flush(),60000,'오디오 flush 타임아웃');
-      aEnc.close();
-      if(encErr) throw encErr;
-      setStatus(`오디오 완료 (패킷 ${aPkts}개) — 영상 인코딩 시작…`);
     }
-
-    /* ── 비디오 프레임 ── */
+    /* 비디오 준비 */
     smoothVals.fill(0); peakVals.fill(0); magPrev.fill(0); bassSm=0; agcGain=1; agcTGain=1;
     pauseAllVideos();
     const totalFrames=Math.ceil(dur*FPS);
     const hasVideoClips=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
-    const specSrc={buffer:mixed};
-    /* 인코더 큐를 깊게 유지해 그리기와 인코딩이 겹쳐 돌게 함 (해상도에 따라 메모리 상한 조정) */
     const QMAX=(W*H>=3840*2160)?6 : (W*H>=1920*1080?24:40);
-    for(let f=0;f<totalFrames;f++){
-      if(state.cancelRender||encErr) break;
-      const t=f/FPS;
-      if(hasVideoClips) await seekVideosAt(t);
-      computeSpectrum(specSrc, Math.min(t, dur-.02));
-      drawFrame(t, true, rg, W, H, false);
-      const vf=new VideoFrame(rcanvas,{timestamp:Math.round(f*1e6/FPS),duration:Math.round(1e6/FPS)});
-      vEnc.encode(vf,{keyFrame:f%(FPS*2)===0}); vf.close();
-      /* 백프레셔 — 평범한 sleep만 사용 (타이머 누수 방지), 최대 대기 상한 */
-      let guard=0;
-      while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && guard++<2500)
-        await new Promise(r=>setTimeout(r,4));
-      if(f%15===0){
-        const pct=f/totalFrames, spd=(f/FPS)/((performance.now()-t0)/1000);
-        const eta=spd>0?(dur-f/FPS)/spd:0;
-        $('progressFill').style.width=(pct*100)+'%';
-        setStatus(`<span class="rec">⚡ 영상 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
-          +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}</span>`);
-        await yieldTask();
+
+    /* ── 구간별 믹싱+인코딩 (긴 영상에서 전체 오디오 버퍼 생성 회피) ── */
+    const SEG=45, pad=fftN/48000;                        /* 45초 구간 + FFT 창 여유 */
+    let audioTs=0, fNext=0;
+    for(let segStart=0; segStart<dur && !state.cancelRender && !encErr; segStart+=SEG){
+      const segEnd=Math.min(dur, segStart+SEG);
+      const from=Math.max(0, segStart-pad), to=Math.min(dur, segEnd+pad), span=to-from;
+      const segBuf=await mixAudioRange(48000, 2, from, to);
+      /* 오디오: [segStart,segEnd) 구간만 AAC로 (샘플 연속 유지) */
+      if(hasAudio && aEnc){
+        const c0=segBuf.getChannelData(0), c1=segBuf.numberOfChannels>1? segBuf.getChannelData(1):segBuf.getChannelData(0);
+        const sIdx=Math.max(0,Math.round((segStart-from)*48000)), eIdx=Math.min(segBuf.length, Math.round((segEnd-from)*48000));
+        for(let k=sIdx;k<eIdx;k+=CHUNK){
+          if(state.cancelRender||encErr) break;
+          const n=Math.min(CHUNK, eIdx-k);
+          plane.set(c0.subarray(k,k+n),0); plane.set(c1.subarray(k,k+n),n);
+          const ad=new AudioData({format:'f32-planar',sampleRate:48000,numberOfFrames:n,
+            numberOfChannels:2,timestamp:Math.round(audioTs),data:plane.subarray(0,n*2)});
+          aEnc.encode(ad); ad.close(); audioTs+=n/48000*1e6;
+          let ag=0; while(aEnc.encodeQueueSize>24 && !state.cancelRender && !encErr && ag++<2000) await new Promise(r=>setTimeout(r,6));
+        }
+      }
+      /* 영상: 이 구간의 프레임들 — 스펙트럼은 구간 버퍼에서 (시간 오프셋 보정) */
+      const specSrc={buffer:segBuf};
+      const fEnd=Math.min(totalFrames, Math.round(segEnd*FPS));
+      for(; fNext<fEnd && !state.cancelRender && !encErr; fNext++){
+        const t=fNext/FPS;
+        if(hasVideoClips) await seekVideosAt(t);
+        computeSpectrum(specSrc, clamp(t-from, 0, span-.02));
+        drawFrame(t, true, rg, W, H, false);
+        const vf=new VideoFrame(rcanvas,{timestamp:Math.round(fNext*1e6/FPS),duration:Math.round(1e6/FPS)});
+        vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
+        let guard=0;
+        while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && guard++<2500)
+          await new Promise(r=>setTimeout(r,4));
+        if(fNext%15===0){
+          const pct=fNext/totalFrames, spd=(fNext/FPS)/((performance.now()-t0)/1000);
+          const eta=spd>0?(dur-fNext/FPS)/spd:0;
+          $('progressFill').style.width=(pct*100)+'%';
+          setStatus(`<span class="rec">⚡ 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
+            +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}</span>`);
+          await yieldTask();
+        }
       }
     }
     if(encErr) throw encErr;
+    if(hasAudio && aEnc){
+      if(!state.cancelRender) await withTimeout(aEnc.flush(),60000,'오디오 flush 타임아웃');
+      aEnc.close();
+    }
     await withTimeout(vEnc.flush(),60000,'영상 flush 타임아웃');
     vEnc.close();
 
