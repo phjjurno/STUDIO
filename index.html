@@ -183,6 +183,9 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .tlClip.hasTrans .tzone{display:block}
 #playhead{position:absolute;top:0;bottom:0;width:0;border-left:1.5px solid var(--amber);z-index:9;pointer-events:none}
 #playhead::before{content:'';position:absolute;top:0;left:-7px;border:6.5px solid transparent;border-top:9px solid var(--amber)}
+#tlSel{position:absolute;top:0;bottom:0;background:rgba(120,200,255,.12);border-left:2px solid #6cc6ff;border-right:2px solid #6cc6ff;z-index:8;display:none;pointer-events:none}
+#tlSel .selLab{position:absolute;top:1px;left:5px;font-size:10px;color:#bfe6ff;background:rgba(8,10,14,.72);padding:1px 6px;border-radius:5px;white-space:nowrap}
+#tlSel .selClr{position:absolute;top:1px;right:2px;font-size:11px;line-height:1;color:#fff;background:rgba(0,0,0,.55);border-radius:5px;padding:2px 6px;cursor:pointer;pointer-events:auto}
 
 /* ── 내보내기 대화상자 ── */
 #expDlg{position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.72);display:none;align-items:center;justify-content:center}
@@ -640,6 +643,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <div id="tlInner">
       <div id="tlRuler"><canvas id="rulerCv" height="26"></canvas></div>
       <div id="tlTracks"></div>
+      <div id="tlSel"><span class="selLab"></span><span class="selClr" title="구간 해제">✕</span></div>
       <div id="playhead"></div>
     </div>
   </div>
@@ -3159,7 +3163,7 @@ function renderTL(){
     });
     row.appendChild(head); row.appendChild(lane); tlTracksEl.appendChild(row);
   }
-  positionPlayhead(); syncTlBar();
+  positionPlayhead(); syncTlBar(); updateTlSel();
 }
 function clipEl(c,tr){
   const d=document.createElement('div');
@@ -3286,18 +3290,49 @@ document.addEventListener('pointerup',e=>{
   renderAll();
 });
 
-/* 눈금자 클릭/드래그 시킹 */
+/* 내보내기 구간 선택 밴드 */
+function updateTlSel(){
+  const el=$('tlSel'); if(!el) return;
+  const dur=tlDuration();
+  const show = exp.end>exp.start+0.05 && (exp.start>0.05 || exp.end<dur-0.05);
+  if(show){
+    el.style.display='block';
+    el.style.left=xOf(exp.start)+'px';
+    el.style.width=Math.max(3,(exp.end-exp.start)*state.pxs)+'px';
+    el.querySelector('.selLab').textContent=`내보낼 구간 ${fmtT(exp.start)} ~ ${fmtT(exp.end)}`;
+  }else el.style.display='none';
+}
+function clearTlSel(){ exp.start=0; exp.end=0; updateTlSel(); setStatus('내보내기 구간 해제 — 전체가 인코딩됩니다.'); }
+$('tlSel').querySelector('.selClr').addEventListener('pointerdown',e=>{ e.stopPropagation(); e.preventDefault(); clearTlSel(); });
+
+/* 눈금자: 클릭=시킹 · 드래그=내보내기 구간 선택 */
 {
   const ruler=$('tlRuler');
-  let scrub=false;
+  let mode=null, x0=0, t0=0;
   ruler.addEventListener('pointerdown',e=>{
     if(state.rendering) return;
-    scrub=true; ruler.setPointerCapture(e.pointerId);
-    seekTo(Math.max(0,laneT(e.clientX)));
+    ruler.setPointerCapture(e.pointerId);
+    x0=e.clientX; t0=Math.max(0,laneT(e.clientX)); mode='pending';
   });
-  ruler.addEventListener('pointermove',e=>{ if(scrub) seekTo(Math.max(0,laneT(e.clientX))); });
-  ruler.addEventListener('pointerup',()=>scrub=false);
-  ruler.addEventListener('pointercancel',()=>scrub=false);
+  ruler.addEventListener('pointermove',e=>{
+    if(!mode) return;
+    if(mode==='pending'){ if(Math.abs(e.clientX-x0)<4) return; mode='range'; }
+    if(mode==='range'){
+      const t1=Math.max(0,Math.min(tlDuration(),laneT(e.clientX)));
+      exp.start=Math.max(0,Math.min(t0,t1)); exp.end=Math.min(tlDuration(),Math.max(t0,t1));
+      updateTlSel();
+    }
+  });
+  ruler.addEventListener('pointerup',e=>{
+    if(mode==='pending'){ seekTo(Math.max(0,laneT(e.clientX))); }
+    else if(mode==='range'){
+      if(exp.end-exp.start<0.15){ clearTlSel(); }
+      else { seekTo(exp.start);
+        setStatus(`내보낼 구간 선택: ${fmtT(exp.start)} ~ ${fmtT(exp.end)} (${fmtT(exp.end-exp.start)}) — 「내보내기」 하면 이 구간만 인코딩됩니다.`); }
+    }
+    mode=null;
+  });
+  ruler.addEventListener('pointercancel',()=>{ mode=null; });
 }
 
 /* 툴바 */
@@ -6391,15 +6426,15 @@ $('expFpsRow').addEventListener('click',e=>{
 $('expStart').addEventListener('change',e=>{ const dur=tlDuration();
   let v=parseT(e.target.value); if(isNaN(v)) v=exp.start;
   exp.start=clamp(v,0,dur-0.1); if(exp.end<=exp.start) exp.end=Math.min(dur,exp.start+1);
-  e.target.value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end); expEst(); });
+  e.target.value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end); expEst(); updateTlSel(); });
 $('expEnd').addEventListener('change',e=>{ const dur=tlDuration();
   let v=parseT(e.target.value); if(isNaN(v)) v=exp.end;
-  exp.end=clamp(v,exp.start+0.1,dur); e.target.value=fmtT(exp.end); expEst(); });
+  exp.end=clamp(v,exp.start+0.1,dur); e.target.value=fmtT(exp.end); expEst(); updateTlSel(); });
 $('expRangePlay').onclick=()=>{ const dur=tlDuration();
   exp.start=clamp(state.time,0,dur-0.1); if(exp.end<=exp.start) exp.end=dur;
-  $('expStart').value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end); expEst(); };
+  $('expStart').value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end); expEst(); updateTlSel(); };
 $('expRangeFull').onclick=()=>{ const dur=tlDuration(); exp.start=0; exp.end=dur;
-  $('expStart').value=fmtT(0); $('expEnd').value=fmtT(dur); expEst(); };
+  $('expStart').value=fmtT(0); $('expEnd').value=fmtT(dur); expEst(); updateTlSel(); };
 $('expFadeIn').addEventListener('change',e=>{ exp.fadeIn=Math.max(0,+e.target.value||0); expEst(); });
 $('expFadeOut').addEventListener('change',e=>{ exp.fadeOut=Math.max(0,+e.target.value||0); expEst(); });
 function expEst(){
