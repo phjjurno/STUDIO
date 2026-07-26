@@ -348,7 +348,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-tp="lp">💿 LP 레코드</button>
       </div>
       <div id="lpOpts" style="display:none">
-      <div class="row" style="margin-top:6px"><button class="chip" id="lpArmBtn">🎯 톤암 표시</button></div>
+      <div class="row" style="margin-top:6px"><button class="chip" id="lpArmBtn">🎯 톤암 표시</button><button class="chip" id="lpSideTitleBtn">🏷 제목 텍스트 따로</button></div>
       <div class="sliders">
         <div class="slider"><label>LP 크기 <span class="slider-rhs"><b id="lpScaleV" style="display:none">100%</b><input type="number" class="snum" id="lpScaleN" min="30" max="200" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="lpScale" min="30" max="200" value="100"></div>
@@ -2611,7 +2611,7 @@ const state = {
   el:{ wave:{x:.5,y:.74,sw:1,sh:1}, title:{x:.5,y:0,custom:false},
        label:{x:.5,y:0,custom:false}, lyrics:{x:.5,y:.84,custom:false},
        lp:{x:.5,y:.5,scale:1} },
-  template:'none', lpTonearm:true,
+  template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
   waveColor:'#FFFFFF', titleColor:'#FFFFFF',
   glow:1, shadowOn:true, vignette:true, titleScale:1, showTitle:true,
@@ -2925,15 +2925,18 @@ function startDragReorder(e, idx){
   const rows=()=>[...list.querySelectorAll('.track-wrap')];
   const mark=()=>rows().forEach(w=>w.classList.toggle('dragme', +w.dataset.idx===cur));
   mark();
+  /* 스크롤 컨테이너 찾기 (미디어 탭 패널) */
+  const scroller=(()=>{ let el=list.parentElement; while(el){ const oy=getComputedStyle(el).overflowY;
+    if(oy==='auto'||oy==='scroll') return el; el=el.parentElement; } return list; })();
   /* 포인터 Y를 각 행의 중앙과 비교해 목표 인덱스 계산 (elementFromPoint보다 견고) */
   const targetIdx=y=>{
-    const rs=rows(); let t=rs.length-1;
+    const rs=rows(); if(!rs.length) return 0; let t=rs.length-1;
     for(let k=0;k<rs.length;k++){ const r=rs[k].getBoundingClientRect();
       if(y < r.top + r.height/2){ t=k; break; } }
     return t;
   };
-  const move=ev=>{
-    const t=targetIdx(ev.clientY);
+  const reorderAt=y=>{
+    const t=targetIdx(y);
     if(t!==cur && t>=0){
       const tr=plTrack(); const cs=plClips();
       const [item]=cs.splice(cur,1); cs.splice(t,0,item);
@@ -2941,7 +2944,21 @@ function startDragReorder(e, idx){
       renderTracklist(); mark();
     }
   };
+  /* 목록 위/아래 끝 근처로 가면 자동 스크롤하며 계속 재정렬 */
+  let lastY=0, scrollRAF=0;
+  const scrollLoop=()=>{
+    const r=scroller.getBoundingClientRect(), edge=46, max=16;
+    let dv=0;
+    if(lastY<r.top+edge) dv=-Math.ceil(max*Math.min(1,(r.top+edge-lastY)/edge));
+    else if(lastY>r.bottom-edge) dv=Math.ceil(max*Math.min(1,(lastY-(r.bottom-edge))/edge));
+    if(!dv){ scrollRAF=0; return; }
+    const before=scroller.scrollTop; scroller.scrollTop+=dv;
+    if(scroller.scrollTop!==before) reorderAt(lastY);
+    scrollRAF=requestAnimationFrame(scrollLoop);
+  };
+  const move=ev=>{ lastY=ev.clientY; reorderAt(lastY); if(!scrollRAF) scrollRAF=requestAnimationFrame(scrollLoop); };
   const up=()=>{
+    cancelAnimationFrame(scrollRAF); scrollRAF=0;
     document.removeEventListener('pointermove',move);
     document.removeEventListener('pointerup',up);
     document.removeEventListener('pointercancel',up);
@@ -3048,6 +3065,13 @@ function renderTracklist(){
     el.querySelector('.rm').onclick=()=>{ pushUndo();
       const tr=plTrack(); tr.clips=tr.clips.filter(x=>x!==c); plRepack(); renderAll(); };
     el.querySelector('.drag').addEventListener('pointerdown',e=>startDragReorder(e,i));
+    /* 곡 클릭 → 그 곡 시작으로 재생헤드 이동 (버튼·입력창 제외) */
+    const idxSpan=el.querySelector('.idx');
+    idxSpan.style.cursor='pointer'; idxSpan.title='이 곡 앞에서 재생';
+    el.addEventListener('click',ev=>{
+      if(ev.target.closest('input,button,textarea,select')) return;
+      seekTo(c.start);
+    });
     wrap.appendChild(el); wrap.appendChild(lbox); wrap.appendChild(cbox); list.appendChild(wrap);
   });
 }
@@ -5353,6 +5377,12 @@ function drawPlaylistText(t){
   const lt=Math.max(0,t-c.start), lMs=lt*1000;
   if(state.template==='lp'){
     drawLP(t, c, idx, cs, a);
+    /* LP 위에 별도(고정) 제목 텍스트 — 드래그로 위치 이동 */
+    if(state.lpSideTitle){
+      state.titleShownAt=lMs<900? .0001 : 0;
+      drawTitle(c.title||(a?a.name:''), idx, cs.length, null, lMs<900? lMs+.0001 : null);
+      state.titleShownAt=0;
+    }
   }else if(state.showTitle){
     state.titleShownAt=lMs<900? .0001 : 0;
     drawTitle(c.title||(a?a.name:''), idx, cs.length, null, lMs<900? lMs+.0001 : null);
@@ -6205,6 +6235,8 @@ bindSlider('lpX','lpXV',v=>{ if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1}; s
 bindSlider('lpY','lpYV',v=>{ if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1}; state.el.lp.y=v/100; });
 $('lpArmBtn').addEventListener('click',e=>{ e.target.classList.toggle('on');
   state.lpTonearm=e.target.classList.contains('on'); if(state.lpTonearm) ensureLP(); drawNow(); });
+$('lpSideTitleBtn').addEventListener('click',e=>{ e.target.classList.toggle('on');
+  state.lpSideTitle=e.target.classList.contains('on'); drawNow(); });
 /* 트랙 번호 라벨 */
 $('tlbShowBtn').addEventListener('click',e=>{
   e.target.classList.toggle('on');
@@ -6569,7 +6601,7 @@ function snapshotSettings(){
     glow:state.glow, shadowOn:state.shadowOn, vignette:state.vignette,
     titleScale:state.titleScale, showTitle:state.showTitle,
     fontIdx:Math.max(0,FONTS.indexOf(state.font)),
-    template:state.template, lpTonearm:state.lpTonearm, trackLabel:{...state.trackLabel},
+    template:state.template, lpTonearm:state.lpTonearm, lpSideTitle:state.lpSideTitle, trackLabel:{...state.trackLabel},
     progressBar:{...state.progressBar} };
 }
 function applySettings(s){
@@ -6582,7 +6614,7 @@ function applySettings(s){
     opacity:s.logo.opacity, bright:s.logo.bright!=null?s.logo.bright:1, con:s.logo.con!=null?s.logo.con:1});
   state.wave=s.wave; state.el=JSON.parse(JSON.stringify(s.el));
   if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1};
-  state.template=s.template||'none'; state.lpTonearm=!!s.lpTonearm;
+  state.template=s.template||"none"; state.lpTonearm=!!s.lpTonearm; state.lpSideTitle=!!s.lpSideTitle;
   if(s.trackLabel) Object.assign(state.trackLabel, s.trackLabel);
   state.waveColor=s.waveColor; state.titleColor=s.titleColor;
   state.glow=s.glow; state.shadowOn=s.shadowOn; state.vignette=s.vignette;
@@ -6602,6 +6634,7 @@ function syncUIFromState(){
   $('lpOpts').style.display=state.template==='lp'?'':'none';
   $('lpHint').style.display=state.template==='lp'?'':'none';
   $('lpArmBtn').classList.toggle('on',!!state.lpTonearm);
+  $('lpSideTitleBtn').classList.toggle('on',!!state.lpSideTitle);
   const TL=state.trackLabel;
   $('tlbShowBtn').classList.toggle('on',TL.show);
   $('tlbLinkBtn').classList.toggle('on',TL.link);
