@@ -663,6 +663,20 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <button class="chip on" data-fps="30">30 fps</button>
     <button class="chip" data-fps="60">60 fps</button>
   </div>
+  <div class="opt-label">구간 (시작 ~ 끝)</div>
+  <div class="row" id="expRangeRow" style="gap:6px;align-items:center">
+    <input class="snum" id="expStart" style="width:74px" value="0:00">
+    <span style="color:var(--dim)">~</span>
+    <input class="snum" id="expEnd" style="width:74px" value="0:00">
+    <button class="chip" id="expRangePlay">▶ 재생헤드→시작</button>
+    <button class="chip" id="expRangeFull">전체</button>
+  </div>
+  <div class="opt-label">페이드 (구간 기준 · 초)</div>
+  <div class="row" style="gap:12px;align-items:center">
+    <label style="font-size:12px;color:var(--dim)">인 <input type="number" class="snum" id="expFadeIn" min="0" max="15" step="0.5" value="0" style="width:52px"></label>
+    <label style="font-size:12px;color:var(--dim)">아웃 <input type="number" class="snum" id="expFadeOut" min="0" max="15" step="0.5" value="0" style="width:52px"></label>
+    <span style="font-size:11px;color:var(--dim)">화면·소리 함께 페이드</span>
+  </div>
   <div class="est" id="expEst"></div>
   <div class="actions">
     <button id="expClose">닫기</button>
@@ -6338,9 +6352,10 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ═══════ 내보내기 ═══════ */
-const exp={w:1920,h:1080,scale:1,fps:30};
+const exp={w:1920,h:1080,scale:1,fps:30, start:0, end:0, fadeIn:0, fadeOut:0};
 $('exportBtn').onclick=()=>{
-  if(tlDuration()<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
+  const dur=tlDuration();
+  if(dur<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
   /* 현재 비율에 맞는 해상도 자동 선택 */
   const ar=state.ratio.w/state.ratio.h;
   [...$('expResRow').children].forEach(c=>{
@@ -6348,6 +6363,11 @@ $('exportBtn').onclick=()=>{
     c.classList.toggle('on',match);
     if(match){ exp.w=+c.dataset.w; exp.h=+c.dataset.h; }
   });
+  /* 구간 기본값 정리 (범위 벗어나면 전체) */
+  if(!(exp.end>exp.start) || exp.end>dur+0.01){ exp.start=0; exp.end=dur; }
+  exp.start=clamp(exp.start,0,dur); exp.end=clamp(exp.end,exp.start+0.1,dur);
+  $('expStart').value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end);
+  $('expFadeIn').value=exp.fadeIn||0; $('expFadeOut').value=exp.fadeOut||0;
   expEst();
   $('expDlg').classList.add('show');
 };
@@ -6367,11 +6387,28 @@ $('expFpsRow').addEventListener('click',e=>{
   [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
   exp.fps=+b.dataset.fps; expEst();
 });
+/* 구간·페이드 입력 */
+$('expStart').addEventListener('change',e=>{ const dur=tlDuration();
+  let v=parseT(e.target.value); if(isNaN(v)) v=exp.start;
+  exp.start=clamp(v,0,dur-0.1); if(exp.end<=exp.start) exp.end=Math.min(dur,exp.start+1);
+  e.target.value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end); expEst(); });
+$('expEnd').addEventListener('change',e=>{ const dur=tlDuration();
+  let v=parseT(e.target.value); if(isNaN(v)) v=exp.end;
+  exp.end=clamp(v,exp.start+0.1,dur); e.target.value=fmtT(exp.end); expEst(); });
+$('expRangePlay').onclick=()=>{ const dur=tlDuration();
+  exp.start=clamp(state.time,0,dur-0.1); if(exp.end<=exp.start) exp.end=dur;
+  $('expStart').value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end); expEst(); };
+$('expRangeFull').onclick=()=>{ const dur=tlDuration(); exp.start=0; exp.end=dur;
+  $('expStart').value=fmtT(0); $('expEnd').value=fmtT(dur); expEst(); };
+$('expFadeIn').addEventListener('change',e=>{ exp.fadeIn=Math.max(0,+e.target.value||0); expEst(); });
+$('expFadeOut').addEventListener('change',e=>{ exp.fadeOut=Math.max(0,+e.target.value||0); expEst(); });
 function expEst(){
   const dur=tlDuration();
+  const outDur=Math.max(0.1, (exp.end>exp.start? exp.end : dur) - exp.start);
   const W=exp.w*exp.scale,H=exp.h*exp.scale;
-  const estGB=(W*H*(exp.fps===60?3.4:2.8)+192000)*dur/8/1e9;
-  $('expEst').innerHTML=`길이 ${fmt(dur)} · ${W}×${H} @${exp.fps}fps · 예상 용량 약 <b style="color:var(--mist)">${estGB<1? (estGB*1000).toFixed(0)+'MB' : estGB.toFixed(1)+'GB'}</b><br>자막·텍스트·효과는 영상에 번인(burn-in)됩니다. WebCodecs 고속 렌더 → 미지원 시 호환 모드 제공.`;
+  const estGB=(W*H*(exp.fps===60?3.4:2.8)+192000)*outDur/8/1e9;
+  const rangeNote = (exp.start>0.01||exp.end<dur-0.01)? ` <b style="color:var(--amber)">(구간 ${fmt(exp.start)}~${fmt(exp.end||dur)})</b>`:'';
+  $('expEst').innerHTML=`길이 ${fmt(outDur)}${rangeNote} · ${W}×${H} @${exp.fps}fps · 예상 용량 약 <b style="color:var(--mist)">${estGB<1? (estGB*1000).toFixed(0)+'MB' : estGB.toFixed(1)+'GB'}</b><br>자막·텍스트·효과는 영상에 번인(burn-in)됩니다. WebCodecs 고속 렌더 → 미지원 시 호환 모드 제공.`;
 }
 $('expGo').onclick=async()=>{
   $('expDlg').classList.remove('show');
@@ -6387,6 +6424,12 @@ async function startExport(){
     offerRealtime('이 브라우저는 고속 렌더(WebCodecs)를 지원하지 않습니다.'); return;
   }
   const W=exp.w*exp.scale, H=exp.h*exp.scale, FPS=exp.fps;
+  /* ── 내보낼 구간 · 페이드 (구간 기준) ── */
+  const exStart=clamp(exp.start||0, 0, dur-0.05);
+  const exEnd=clamp(exp.end>exp.start? exp.end : dur, exStart+0.1, dur);
+  const outDur=exEnd-exStart;
+  const fadeIn=clamp(exp.fadeIn||0, 0, outDur/2);
+  const fadeOut=clamp(exp.fadeOut||0, 0, outDur/2);
   /* 코덱 확인 — 속도 우선: realtime 모드 + 하드웨어 인코더 우선 선택 */
   const vCfg={codec:(W>=3840||H>=2160)?'avc1.640033':'avc1.64002A',
     width:W,height:H,bitrate:Math.round(W*H*(FPS===60?3.4:2.8)),framerate:FPS,
@@ -6408,7 +6451,7 @@ async function startExport(){
 
   /* 저장 위치 (Chrome: 디스크 직접 기록) */
   let fileWritable=null;
-  const estGB=(vCfg.bitrate+192000)*dur/8/1e9;
+  const estGB=(vCfg.bitrate+192000)*outDur/8/1e9;
   if(window.showSaveFilePicker){
     try{
       const handle=await showSaveFilePicker({
@@ -6471,39 +6514,49 @@ async function startExport(){
     /* 비디오 준비 */
     smoothVals.fill(0); peakVals.fill(0); magPrev.fill(0); bassSm=0; agcGain=1; agcTGain=1;
     pauseAllVideos();
-    const totalFrames=Math.ceil(dur*FPS);
+    const totalFrames=Math.ceil(outDur*FPS);
     const hasVideoClips=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
     const QMAX=(W*H>=3840*2160)?6 : (W*H>=1920*1080?24:40);
 
-    /* ── 구간별 믹싱+인코딩 (긴 영상에서 전체 오디오 버퍼 생성 회피) ── */
+    /* ── 구간별 믹싱+인코딩 (출력 0~outDur, 타임라인은 exStart 오프셋) ── */
     const SEG=45, pad=fftN/48000;                        /* 45초 구간 + FFT 창 여유 */
+    const fadeF=ot=>{ let f=1;                            /* 구간 기준 페이드 계수 */
+      if(fadeIn>0 && ot<fadeIn) f=ot/fadeIn;
+      if(fadeOut>0 && ot>outDur-fadeOut) f=Math.min(f,(outDur-ot)/fadeOut);
+      return clamp(f,0,1); };
     let audioTs=0, fNext=0;
-    for(let segStart=0; segStart<dur && !state.cancelRender && !encErr; segStart+=SEG){
-      const segEnd=Math.min(dur, segStart+SEG);
-      const from=Math.max(0, segStart-pad), to=Math.min(dur, segEnd+pad), span=to-from;
+    for(let segS=0; segS<outDur && !state.cancelRender && !encErr; segS+=SEG){
+      const segE=Math.min(outDur, segS+SEG);
+      const from=Math.max(0, exStart+segS-pad), to=Math.min(dur, exStart+segE+pad), span=to-from;
       const segBuf=await mixAudioRange(48000, 2, from, to);
-      /* 오디오: [segStart,segEnd) 구간만 AAC로 (샘플 연속 유지) */
+      /* 오디오: 출력 [segS,segE) → 타임라인 [exStart+segS, exStart+segE) + 페이드 */
       if(hasAudio && aEnc){
         const c0=segBuf.getChannelData(0), c1=segBuf.numberOfChannels>1? segBuf.getChannelData(1):segBuf.getChannelData(0);
-        const sIdx=Math.max(0,Math.round((segStart-from)*48000)), eIdx=Math.min(segBuf.length, Math.round((segEnd-from)*48000));
+        const sIdx=Math.max(0,Math.round((exStart+segS-from)*48000)), eIdx=Math.min(segBuf.length, Math.round((exStart+segE-from)*48000));
         for(let k=sIdx;k<eIdx;k+=CHUNK){
           if(state.cancelRender||encErr) break;
           const n=Math.min(CHUNK, eIdx-k);
           plane.set(c0.subarray(k,k+n),0); plane.set(c1.subarray(k,k+n),n);
+          if(fadeIn>0||fadeOut>0){
+            for(let j=0;j<n;j++){ const ot=segS+(k-sIdx+j)/48000, f=fadeF(ot);
+              if(f<1){ plane[j]*=f; plane[n+j]*=f; } }
+          }
           const ad=new AudioData({format:'f32-planar',sampleRate:48000,numberOfFrames:n,
             numberOfChannels:2,timestamp:Math.round(audioTs),data:plane.subarray(0,n*2)});
           aEnc.encode(ad); ad.close(); audioTs+=n/48000*1e6;
           let ag=0; while(aEnc.encodeQueueSize>24 && !state.cancelRender && !encErr && ag++<2000) await new Promise(r=>setTimeout(r,6));
         }
       }
-      /* 영상: 이 구간의 프레임들 — 스펙트럼은 구간 버퍼에서 (시간 오프셋 보정) */
+      /* 영상: 출력 프레임 ot=fNext/FPS → 타임라인 t=exStart+ot */
       const specSrc={buffer:segBuf};
-      const fEnd=Math.min(totalFrames, Math.round(segEnd*FPS));
+      const fEnd=Math.min(totalFrames, Math.round(segE*FPS));
       for(; fNext<fEnd && !state.cancelRender && !encErr; fNext++){
-        const t=fNext/FPS;
+        const ot=fNext/FPS, t=exStart+ot;
         if(hasVideoClips) await seekVideosAt(t);
         computeSpectrum(specSrc, clamp(t-from, 0, span-.02));
         drawFrame(t, true, rg, W, H, false);
+        if(fadeIn>0||fadeOut>0){ const bf=1-fadeF(ot);   /* 화면 검정 페이드 */
+          if(bf>0){ rg.save(); rg.globalAlpha=Math.min(1,bf); rg.fillStyle='#000'; rg.fillRect(0,0,W,H); rg.restore(); } }
         const vf=new VideoFrame(rcanvas,{timestamp:Math.round(fNext*1e6/FPS),duration:Math.round(1e6/FPS)});
         vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
         let guard=0;
@@ -6511,7 +6564,7 @@ async function startExport(){
           await new Promise(r=>setTimeout(r,4));
         if(fNext%15===0){
           const pct=fNext/totalFrames, spd=(fNext/FPS)/((performance.now()-t0)/1000);
-          const eta=spd>0?(dur-fNext/FPS)/spd:0;
+          const eta=spd>0?(outDur-fNext/FPS)/spd:0;
           $('progressFill').style.width=(pct*100)+'%';
           setStatus(`<span class="rec">⚡ 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
             +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}</span>`);
@@ -6541,7 +6594,7 @@ async function startExport(){
       a.className='dl'; a.href='#';
       a.innerHTML=`<span>✅ ${name} — 선택한 위치에 저장됨</span><span class="save">✓</span>`;
       $('downloads').appendChild(a);
-      setStatus(`✅ 완성 — ${fmt(dur)} 분량 · ${fmt(took)} 소요 (디스크 직접 저장)`);
+      setStatus(`✅ 완성 — ${fmt(outDur)} 분량 · ${fmt(took)} 소요 (디스크 직접 저장)`);
     }else{
       const buf=muxer.target.buffer;
       if(!buf||buf.byteLength===0){ setStatus('인코딩 결과가 비어 있습니다 — Chrome에서 저장 위치 지정을 사용해 보세요.'); return; }
@@ -6553,7 +6606,7 @@ async function startExport(){
       $('downloads').appendChild(a);
       try{a.click();}catch(e){}
       setTimeout(()=>URL.revokeObjectURL(url),180000);
-      setStatus(`✅ 완성 — ${fmt(dur)} 분량 · ${fmt(took)} 소요 · ${(blob.size/1048576).toFixed(1)}MB`);
+      setStatus(`✅ 완성 — ${fmt(outDur)} 분량 · ${fmt(took)} 소요 · ${(blob.size/1048576).toFixed(1)}MB`);
     }
     $('progressFill').style.width='100%';
   }catch(e){
