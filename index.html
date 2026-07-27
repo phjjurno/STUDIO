@@ -190,6 +190,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #tlSel .selHL{left:-8px}
 #tlSel .selHR{right:-8px}
 #tlSel .selH::after{content:'';position:absolute;top:36%;bottom:36%;width:4px;left:5px;border-radius:2px;background:#6cc6ff;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
+#bgPickRow{gap:6px}
+#bgPickRow .bgth{width:52px;height:34px;border-radius:7px;border:1.5px solid var(--line);background-size:cover;background-position:center;cursor:pointer;padding:0}
+#bgPickRow .bgth.on{border-color:var(--amber);box-shadow:0 0 0 1.5px var(--amber)}
+.preview-wrap.dragover{outline:2px dashed var(--amber);outline-offset:-6px}
+#tlRub{position:absolute;border:1.5px dashed var(--sel);background:rgba(227,181,100,.12);z-index:10;display:none;pointer-events:none;border-radius:4px}
 
 /* ── 내보내기 대화상자 ── */
 #expDlg{position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.72);display:none;align-items:center;justify-content:center}
@@ -273,6 +278,9 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" id="bgImageBtn">🖼 이미지 업로드</button>
         <input type="file" id="bgFileInput" accept="image/*">
       </div>
+      <div class="hint2" style="margin-top:6px">폴더에서 이미지를 <b>미리보기 화면으로 끌어다 놓아도</b> 배경이 됩니다.</div>
+      <div class="opt-label" id="bgPickLab" style="display:none">가져온 이미지에서 선택</div>
+      <div class="row" id="bgPickRow"></div>
       <div id="bgControls">
         <div class="opt-label">배경 이미지 조절</div>
         <div class="sliders">
@@ -464,6 +472,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-wv="thinline">미니멀 라인</button>
         <button class="chip" data-wv="ecg">심전도</button>
         <button class="chip" data-wv="ripplewave">리플 링</button>
+        <button class="chip" data-wv="silk">🎗 실크 리본</button>
+        <button class="chip" data-wv="bloom">🌸 블룸</button>
+        <button class="chip" data-wv="auroraband">🌌 오로라 밴드</button>
+        <button class="chip" data-wv="droplet">💧 물방울</button>
+        <button class="chip" data-wv="constellation">✨ 별자리</button>
       </div>
       <div class="sliders">
         <div class="slider"><label>파형 가로 위치 <span class="slider-rhs"><b id="waveXV" style="display:none">50%</b><input type="number" class="snum" id="waveXN" min="5" max="95" value="50"><small class="usuf">%</small></span></label>
@@ -491,6 +504,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-pbs="neon">네온</button>
         <button class="chip" data-pbs="minimal">미니멀</button>
         <button class="chip" data-pbs="pill">알약형</button>
+        <button class="chip" data-pbs="segment">▮ 세그먼트</button>
+        <button class="chip" data-pbs="dotline">• 도트 라인</button>
+        <button class="chip" data-pbs="wavebar">〜 물결</button>
+        <button class="chip" data-pbs="hairline">— 헤어라인</button>
+        <button class="chip" data-pbs="candy">🍬 캔디</button>
       </div>
       <div class="opt-label">색상</div>
       <div class="row">
@@ -647,6 +665,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <div id="tlInner">
       <div id="tlRuler"><canvas id="rulerCv" height="26"></canvas></div>
       <div id="tlTracks"></div>
+      <div id="tlRub"></div>
       <div id="tlSel"><span class="selH selHL"></span><span class="selH selHR"></span><span class="selLab"></span><span class="selClr" title="구간 해제">✕</span></div>
       <div id="playhead"></div>
     </div>
@@ -2646,7 +2665,7 @@ const state = {
   /* 에디터 */
   assets:new Map(),
   tracks:[],
-  sel:null,
+  sel:null, selSet:[],
   time:0, playing:false, rendering:false, cancelRender:false,
   pxs:40, snap:true,
 };
@@ -2774,6 +2793,26 @@ const A=id=>state.assets.get(id);
 const trackById=id=>state.tracks.find(t=>t.id===id);
 function clipById(id){ for(const tr of state.tracks){ const c=tr.clips.find(c=>c.id===id); if(c) return {c,tr}; } return null; }
 const selClip=()=>state.sel? clipById(state.sel) : null;
+/* ── 다중 선택 ── */
+const isSelected=id=>state.sel===id||state.selSet.includes(id);
+function setSelOne(id){ state.sel=id; state.selSet=id?[id]:[]; }
+function toggleSelId(id){
+  const i=state.selSet.indexOf(id);
+  if(i>=0){ state.selSet.splice(i,1); if(state.sel===id) state.sel=state.selSet[state.selSet.length-1]||null; }
+  else { state.selSet.push(id); state.sel=id; }
+}
+function selClipsAll(){
+  const out=[];
+  for(const id of state.selSet){ const r=clipById(id); if(r) out.push(r); }
+  if(!out.length && state.sel){ const r=clipById(state.sel); if(r) out.push(r); }
+  return out;
+}
+function selectAllClips(){
+  state.selSet=[]; for(const tr of state.tracks) for(const c of tr.clips) state.selSet.push(c.id);
+  state.sel=state.selSet[state.selSet.length-1]||null;
+  renderTL(); propsRender();
+  setStatus(`클립 ${state.selSet.length}개 선택됨 — Del 키로 한 번에 삭제할 수 있어요.`);
+}
 const clipEnd=c=>c.start+c.dur;
 function tlDuration(){ let d=0; for(const tr of state.tracks) for(const c of tr.clips) d=Math.max(d,clipEnd(c)); return d; }
 function newClip(assetId, start, dur, extra){
@@ -2812,6 +2851,7 @@ function applySer(s){
       c.lyrics=parseLyrics(c.lyricsRaw, a? a.duration : c.dur); }
   }
   if(state.sel && !clipById(state.sel)) state.sel=null;
+  if(state.selSet&&state.selSet.length) state.selSet=state.selSet.filter(id=>clipById(id));
   renderAll();
 }
 function undo(){ if(!undoStack.length) return; redoStack.push(serTracks()); applySer(undoStack.pop()); }
@@ -3162,7 +3202,8 @@ function renderTL(){
     for(const c of sortedClips(tr)) lane.appendChild(clipEl(c,tr));
     lane.addEventListener('pointerdown',e=>{
       if(e.target!==lane) return;
-      startRangeSelect(e, ev=>{ state.sel=null; renderTL(); propsRender(); seekTo(Math.max(0,laneT(ev.clientX))); });
+      if(e.shiftKey||e.ctrlKey||e.metaKey){ startRubberSelect(e); return; }   /* Shift+드래그 = 클립 다중 선택 */
+      startRangeSelect(e, ev=>{ setSelOne(null); renderTL(); propsRender(); seekTo(Math.max(0,laneT(ev.clientX))); });
     });
     row.appendChild(head); row.appendChild(lane); tlTracksEl.appendChild(row);
   }
@@ -3173,7 +3214,7 @@ function clipEl(c,tr){
   d.className='tlClip k'+({video:'video',audio:'audio',sub:'sub',over:'over'}[tr.kind]);
   d.style.left=(c.start*state.pxs)+'px';
   d.style.width=Math.max(7,c.dur*state.pxs)+'px';
-  if(state.sel===c.id) d.classList.add('sel');
+  if(isSelected(c.id)) d.classList.add('sel');
   const a=c.assetId? A(c.assetId):null;
   if(tr.kind==='video'&&c.trans&&c.trans.type!=='none'&&nextAdj(tr,c)) d.classList.add('hasTrans');
   let label='';
@@ -3207,8 +3248,10 @@ function timeDisp(){ $('timeDisp').textContent=fmtT(state.time)+' / '+fmtT(tlDur
 function syncTlBar(){
   $('undoBtn').disabled=!undoStack.length;
   $('redoBtn').disabled=!redoStack.length;
+  const n=state.selSet? state.selSet.length : 0;
   const has=!!state.sel;
   $('splitBtn').disabled=!has; $('dupBtn').disabled=!has; $('delBtn').disabled=!has;
+  const db=$('delBtn'); if(db) db.textContent = n>1? `🗑 삭제 (${n})` : '🗑 삭제';
 }
 
 /* 스냅 지점 */
@@ -3233,14 +3276,23 @@ let tlDrag=null;
 function clipPointerDown(e,c,tr,el){
   if(state.rendering) return;
   e.preventDefault(); e.stopPropagation();
-  if(state.sel!==c.id){ state.sel=c.id; renderTL(); propsRender();
+  const additive=e.shiftKey||e.ctrlKey||e.metaKey;
+  if(additive){                                   /* Shift/Ctrl+클릭 = 선택 토글 */
+    toggleSelId(c.id); renderTL(); propsRender();
+    setStatus(state.selSet.length>1? `클립 ${state.selSet.length}개 선택됨 — Del 키로 한 번에 삭제` : '');
+    return;
+  }
+  if(!isSelected(c.id)){ setSelOne(c.id); renderTL(); propsRender();
     el=tlTracksEl.querySelector(`[data-cid="${c.id}"]`)||el; }
   const rect=el.getBoundingClientRect();
   const zone=(e.clientX-rect.left<10&&c.dur*state.pxs>26)?'l'
            :(rect.right-e.clientX<10&&c.dur*state.pxs>26)?'r':'move';
   pushUndo();
+  /* 여러 개 선택 상태면 함께 이동 */
+  const grp=selClipsAll().filter(r=>r.c!==c).map(r=>({c:r.c, tr:r.tr, s0:r.c.start}));
   tlDrag={mode:zone, c, tr, x0:e.clientX, y0:e.clientY,
     o:{start:c.start,dur:c.dur,in:c.in}, moved:false, el,
+    grp: zone==='move'? grp : [],
     pts:snapPoints(c.id)};
   el.setPointerCapture(e.pointerId);
 }
@@ -3255,7 +3307,15 @@ document.addEventListener('pointermove',e=>{
     const s1=snapVal(ns,D.pts), s2=snapVal(ns+c.dur,D.pts)-c.dur;
     if(Math.abs(s1-ns)<=Math.abs(s2-ns)&&s1!==ns) ns=s1;
     else if(s2!==ns) ns=Math.max(0,s2);
+    const gd=ns-D.o.start;                        /* 실제 적용된 이동량 */
     c.start=ns;
+    if(D.grp&&D.grp.length){
+      for(const gI of D.grp){
+        gI.c.start=Math.max(0, gI.s0+gd);
+        const gel=tlTracksEl.querySelector(`[data-cid="${gI.c.id}"]`);
+        if(gel) gel.style.left=(gI.c.start*state.pxs)+'px';
+      }
+    }
   }else if(D.mode==='l'){
     let ns=snapVal(Math.max(0,D.o.start+dt),D.pts);
     const minIn = c.assetId&&A(c.assetId)&&A(c.assetId).kind!=='image'? -D.o.in/c.speed : -1e6;
@@ -3278,8 +3338,8 @@ document.addEventListener('pointerup',e=>{
   if(!tlDrag) return;
   const D=tlDrag; tlDrag=null;
   if(!D.moved){ undoStack.pop(); syncTlBar(); return; }
-  if(D.mode==='move'){
-    /* 세로 드래그 → 같은 종류 트랙으로 이동 */
+  if(D.mode==='move' && !(D.grp&&D.grp.length)){
+    /* 세로 드래그 → 같은 종류 트랙으로 이동 (단일 선택일 때만) */
     const el=document.elementFromPoint(e.clientX,e.clientY);
     const lane=el&&el.closest? el.closest('.tlLane'):null;
     if(lane){
@@ -3292,6 +3352,45 @@ document.addEventListener('pointerup',e=>{
   }
   renderAll();
 });
+
+/* Shift+드래그 고무줄 — 여러 클립 한 번에 선택 */
+function startRubberSelect(e){
+  if(state.rendering) return;
+  e.preventDefault();
+  const rub=$('tlRub'), rect=tlInner.getBoundingClientRect();
+  const x0=e.clientX, y0=e.clientY, t0=Math.max(0,laneT(x0));
+  rub.style.display='block';
+  const upd=ev=>{
+    const x1=ev.clientX, y1=ev.clientY;
+    rub.style.left=(Math.min(x0,x1)-rect.left)+'px';
+    rub.style.top=(Math.min(y0,y1)-rect.top)+'px';
+    rub.style.width=Math.abs(x1-x0)+'px';
+    rub.style.height=Math.abs(y1-y0)+'px';
+    const t1=Math.max(0,laneT(x1)), ta=Math.min(t0,t1), tb=Math.max(t0,t1);
+    const ry0=Math.min(y0,y1), ry1=Math.max(y0,y1);
+    const set=[];
+    tlTracksEl.querySelectorAll('.tlClip').forEach(el2=>{
+      const r=el2.getBoundingClientRect();
+      if(r.bottom<ry0||r.top>ry1) return;
+      const rc=clipById(el2.dataset.cid); if(!rc) return;
+      if(clipEnd(rc.c)<ta||rc.c.start>tb) return;
+      set.push(el2.dataset.cid);
+    });
+    state.selSet=set; state.sel=set[set.length-1]||null;
+    tlTracksEl.querySelectorAll('.tlClip').forEach(el2=>el2.classList.toggle('sel', set.includes(el2.dataset.cid)));
+    syncTlBar();
+  };
+  const up=()=>{
+    document.removeEventListener('pointermove',upd);
+    document.removeEventListener('pointerup',up);
+    document.removeEventListener('pointercancel',up);
+    rub.style.display='none'; propsRender(); syncTlBar();
+    if(state.selSet.length) setStatus(`클립 ${state.selSet.length}개 선택됨 — Del 키로 한 번에 삭제할 수 있어요.`);
+  };
+  document.addEventListener('pointermove',upd);
+  document.addEventListener('pointerup',up);
+  document.addEventListener('pointercancel',up);
+}
 
 /* 내보내기 구간 선택 밴드 */
 function updateTlSel(){
@@ -3418,18 +3517,22 @@ function dupSel(){
   renderAll();
 }
 function delSel(){
-  const s=selClip(); if(!s) return;
+  const list=selClipsAll(); if(!list.length) return;
   pushUndo();
-  s.tr.clips=s.tr.clips.filter(x=>x!==s.c);
-  if(s.tr.pl) plRepack();
-  state.sel=null;
+  const touched=new Set();
+  for(const {c,tr} of list){ tr.clips=tr.clips.filter(x=>x!==c); touched.add(tr); }
+  for(const tr of touched) if(tr.pl) plRepack();
+  const n=list.length;
+  state.sel=null; state.selSet=[];
   renderAll();
+  if(n>1) setStatus(`클립 ${n}개를 삭제했습니다.`);
 }
 $('splitBtn').onclick=splitSel; $('dupBtn').onclick=dupSel; $('delBtn').onclick=delSel;
 
 /* 전체 다시 그리기 */
 function renderAll(){
   renderTL(); renderTracklist(); renderAssetList(); renderSubList(); propsRender();
+  if(typeof renderBgPicker==='function') renderBgPicker();
   timeDisp(); drawNow();
 }
 function parseLyrics(text, duration){
@@ -3505,6 +3608,28 @@ function getAmp(i,N,live){
   const cur=smoothVals[i];
   smoothVals[i]=cur+(t-cur)*(t>cur? .5 : .09);
   return smoothVals[i];
+}
+/* ───────── 비트(킥) 검출 — 리듬에 반응하는 파형용 ───────── */
+let beatEnv=0, lastBeatT=-9, beatEvents=[];
+function resetBeat(){ beatEnv=0; lastBeatT=-9; beatEvents.length=0; }
+/* 저역 어택을 감지해 비트 이벤트를 쌓고, 현재 에너지를 함께 반환 */
+function beatAt(live){
+  const T=R.T||0;
+  if(T<lastBeatT-0.5){ resetBeat(); }            /* 뒤로 스크럽 시 초기화 */
+  let b;
+  if(live){
+    let s=0; for(let i=2;i<30;i++) s+=freqData[i];
+    b=Math.min(1, Math.pow(s/28/255, 1.2)*Math.min(3.2,agcGain));
+  }else b=.34+.3*Math.sin(T*3.0);                /* 정지 미리보기용 가상 비트 */
+  const rise=b-beatEnv;
+  beatEnv += (b-beatEnv)*.5;
+  let hit=false;
+  if(live){
+    if(rise>.05 && b>.13 && T-lastBeatT>.19){ hit=true; lastBeatT=T; }
+  }else if(T-lastBeatT>=.55){ hit=true; lastBeatT=T; }
+  if(hit){ beatEvents.push({t:T, s:.55+.45*b});
+    if(beatEvents.length>48) beatEvents.splice(0,beatEvents.length-48); }
+  return {b, hit};
 }
 function roundRect(g,x,y,w,h,r){ g.beginPath();
   g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r);
@@ -4722,17 +4847,17 @@ function drawWave(live){
     box=[x0-unit*.5, CY-maxH, usable+unit, maxH*2];
 
   }else if(state.wave==='ecg'){
-    /* 심전도 — 흐르는 심박 모니터 라인 (모니터 그리드 + 가산 글로우 + 헤드 광채) */
+    /* 심전도 — 실제 비트에 맞춰 심박이 찍히고 왼쪽으로 흐름 */
+    const bt=beatAt(live);
     const span=w*.8*SW, xs=CX-span/2;
-    const pts=240, ampH=h*.11*SH;
+    const pts=260, ampH=h*.12*SH;
     let amp=0; for(let i=0;i<10;i++) amp+=getAmp(i,10,live); amp/=10;
-    const beat=ph=>{ /* QRS 파형 근사 */
-      const p=((ph%1)+1)%1;
-      return Math.exp(-Math.pow((p-.20)/.012,2))*1.0
-           - Math.exp(-Math.pow((p-.165)/.012,2))*.28
-           - Math.exp(-Math.pow((p-.24)/.018,2))*.34
-           + Math.exp(-Math.pow((p-.42)/.05,2))*.16;
-    };
+    const WIN=2.6;                                    /* 화면에 보이는 초 */
+    const qrs=p=>(                                    /* QRS 파형 근사 (p: 0~1) */
+      Math.exp(-Math.pow((p-.30)/.020,2))*1.0
+    - Math.exp(-Math.pow((p-.245)/.020,2))*.28
+    - Math.exp(-Math.pow((p-.36)/.028,2))*.34
+    + Math.exp(-Math.pow((p-.62)/.075,2))*.18);
     /* 모니터 그리드 */
     const gh=ampH*1.4, gy0=CY-gh, gy1=CY+gh;
     g.strokeStyle=hexA(C,.06); g.lineWidth=1;
@@ -4742,7 +4867,19 @@ function drawWave(live){
     /* 베이스 라인 */
     g.strokeStyle=hexA(C,.14); g.lineWidth=1;
     g.beginPath(); g.moveTo(xs,CY); g.lineTo(xs+span,CY); g.stroke();
-    const yAt=f=>CY - beat(f*1.6 - T*.5)*ampH*(.45+.8*amp);
+    /* 오래된 비트 정리 */
+    while(beatEvents.length && T-beatEvents[0].t>WIN+.6) beatEvents.shift();
+    const PW=.62;                                     /* 한 심박이 그려지는 시간 */
+    const yAt=f=>{
+      const tx=T-(1-f)*WIN;                           /* 오른쪽이 현재 */
+      let v=0;
+      for(let k=0;k<beatEvents.length;k++){
+        const d=(tx-beatEvents[k].t)/PW;
+        if(d<0||d>1) continue;
+        v+=qrs(d)*beatEvents[k].s;
+      }
+      return CY - v*ampH*(.65+.55*amp);
+    };
     const trace=()=>{ g.beginPath();
       for(let i=0;i<=pts;i++){ const f=i/pts, x=xs+f*span, y=yAt(f); i?g.lineTo(x,y):g.moveTo(x,y); } };
     g.lineCap='round'; g.lineJoin='round';
@@ -4753,50 +4890,235 @@ function drawWave(live){
     g.restore();
     /* 본선 */
     trace(); g.strokeStyle=hexA(C,.95); g.lineWidth=Math.max(2,m*.0022); g.stroke();
-    /* 스캔 헤드 — 큰 광채 + 코어 */
-    const hf=((T*.5/1.6)%1), hx=xs+(1-hf)*span, hy=yAt(1-hf);
+    /* 현재 지점(오른쪽 끝) 광채 — 비트가 찍히면 크게 번쩍 */
+    const hx=xs+span, hy=yAt(1);
+    const flash=Math.max(0,1-(T-lastBeatT)/.35);
     g.save(); g.globalCompositeOperation='lighter';
-    const hg=g.createRadialGradient(hx,hy,0,hx,hy,m*.03);
-    hg.addColorStop(0,hexA(C,.9)); hg.addColorStop(.4,hexA(C,.35)); hg.addColorStop(1,hexA(C,0));
-    g.fillStyle=hg; g.beginPath(); g.arc(hx,hy,m*.03,0,Math.PI*2); g.fill();
+    const hr0=m*(.022+.03*flash);
+    const hg=g.createRadialGradient(hx,hy,0,hx,hy,hr0);
+    hg.addColorStop(0,hexA(C,.55+.45*flash)); hg.addColorStop(.4,hexA(C,.3*flash+.12)); hg.addColorStop(1,hexA(C,0));
+    g.fillStyle=hg; g.beginPath(); g.arc(hx,hy,hr0,0,Math.PI*2); g.fill();
     g.restore();
     g.fillStyle=hexA(C,1); g.beginPath(); g.arc(hx,hy,m*.0045,0,Math.PI*2); g.fill();
     box=[xs, CY-ampH*1.4, span, ampH*2.8];
 
   }else if(state.wave==='ripplewave'){
-    /* 리플 링 — 비트에 맞춰 퍼지는 동심원 (가산 하이라이트 + 굴절선 + 코어 글로우) */
+    /* 리플 링 — 비트마다 새 파문이 태어나 퍼져나감 */
+    const bt=beatAt(live);
     const S2=(SW+SH)/2;
-    const cx=CX, cy=CY, maxR=m*.32*S2;
+    const cx=CX, cy=CY, maxR=m*.34*S2;
     let amp=0; for(let i=0;i<10;i++) amp+=getAmp(i,10,live); amp/=10;
-    for(let i=0;i<7;i++){
-      const p=((T*.32+i/7)%1);
-      const rr=p*maxR;
+    const LIFE=1.9;
+    while(beatEvents.length && T-beatEvents[0].t>LIFE) beatEvents.shift();
+    for(let k=0;k<beatEvents.length;k++){
+      const ev=beatEvents[k];
+      const age=(T-ev.t)/LIFE;
+      if(age<0||age>1) continue;
+      const rr=Math.pow(age,.72)*maxR;                /* 처음엔 빠르게, 뒤로 갈수록 천천히 */
       if(rr<2) continue;
-      const fade=(1-p);
-      const a=fade*fade*(.3+.5*amp);
+      const fade=1-age;
+      const a=fade*fade*(.42+.5*amp)*ev.s;
       if(a<=.008) continue;
-      /* 밝은 하이라이트 링 (가산) */
       g.save(); g.globalCompositeOperation='lighter';
       g.strokeStyle=hexA(C,a);
-      g.lineWidth=Math.max(1.5,fade*m*.004);
-      g.shadowColor=hexA(C,a); g.shadowBlur=(glowB||m*.01)*.8;
+      g.lineWidth=Math.max(1.5,fade*m*.005);
+      g.shadowColor=hexA(C,a); g.shadowBlur=(glowB||m*.01)*.9;
       g.beginPath(); g.arc(cx,cy,rr,0,Math.PI*2); g.stroke();
       g.restore();
-      /* 안쪽 굴절 그림자선 */
-      g.strokeStyle=hexA(C,a*.35);
+      g.strokeStyle=hexA(C,a*.32);
       g.lineWidth=Math.max(.5,fade*m*.002);
-      g.beginPath(); g.arc(cx,cy,Math.max(1,rr-m*.005),0,Math.PI*2); g.stroke();
+      g.beginPath(); g.arc(cx,cy,Math.max(1,rr-m*.006),0,Math.PI*2); g.stroke();
     }
     g.shadowBlur=0;
-    /* 중심 코어 글로우 */
+    /* 중심 코어 — 비트에 맞춰 두근 */
+    const flash=Math.max(0,1-(T-lastBeatT)/.3);
     g.save(); g.globalCompositeOperation='lighter';
-    const cr0=m*.035*(1+amp);
+    const cr0=m*.035*(1+amp*.8+flash*.7);
     const cg=g.createRadialGradient(cx,cy,0,cx,cy,cr0);
-    cg.addColorStop(0,hexA(C,.75+.25*amp)); cg.addColorStop(.5,hexA(C,.3)); cg.addColorStop(1,hexA(C,0));
+    cg.addColorStop(0,hexA(C,.7+.3*flash)); cg.addColorStop(.5,hexA(C,.28)); cg.addColorStop(1,hexA(C,0));
     g.fillStyle=cg;
     g.beginPath(); g.arc(cx,cy,cr0,0,Math.PI*2); g.fill();
     g.restore();
     box=[cx-maxR, cy-maxR, maxR*2, maxR*2];
+
+  }else if(state.wave==='silk'){
+    /* 실크 리본 — 부드럽게 흐르는 반투명 띠 여러 겹 */
+    const span=w*.94*SW, xs=CX-span/2, pts=80, ampH=h*.085*SH;
+    const LAY=4;
+    for(let L=0;L<LAY;L++){
+      const ph=L*.9, sc=1-L*.16, alpha=(.34-L*.06);
+      const ys=[];
+      for(let i=0;i<=pts;i++){
+        const f=i/pts;
+        const v=live? liveSample(f*.94+.03) : Math.sin(f*7+T*1.6)*.35;
+        const env=Math.sin(Math.PI*f);
+        const flow=Math.sin(f*3.1+T*(.9+L*.22)+ph)*.5+Math.sin(f*6.7-T*(.6+L*.15))*.22;
+        ys.push(CY+(v*.55+flow)*ampH*sc*env);
+      }
+      const path=()=>{ g.beginPath(); g.moveTo(xs,ys[0]);
+        for(let i=1;i<pts;i++){ const xc=xs+((i+.5)/pts)*span;
+          g.quadraticCurveTo(xs+i/pts*span, ys[i], xc, (ys[i]+ys[i+1])/2); }
+        g.lineTo(xs+span,ys[pts]); };
+      g.save(); g.globalCompositeOperation='lighter';
+      path();
+      g.lineWidth=Math.max(2,m*(.012-L*.0022)); g.lineCap='round'; g.lineJoin='round';
+      const lg=g.createLinearGradient(xs,0,xs+span,0);
+      lg.addColorStop(0,hexA(C,0)); lg.addColorStop(.5,hexA(C,alpha)); lg.addColorStop(1,hexA(C,0));
+      g.strokeStyle=lg;
+      if(glowA){ g.shadowColor=hexA(C,glowA*.6); g.shadowBlur=glowB*.9; }
+      g.stroke();
+      g.restore();
+    }
+    box=[xs, CY-ampH*1.6, span, ampH*3.2];
+
+  }else if(state.wave==='bloom'){
+    /* 블룸 — 중심에서 피어나는 꽃잎 (음악이 커질수록 활짝) */
+    const S2=(SW+SH)/2, cx=CX, cy=CY;
+    const N=18, r0=m*.07*S2, maxL=m*.17*S2;
+    g.save(); g.globalCompositeOperation='lighter';
+    for(let i=0;i<N;i++){
+      const v=getAmp(i%(N/2), N/2, live);
+      const a0=(i/N)*Math.PI*2 + T*.12;
+      const L=r0+Math.pow(v,.85)*maxL;
+      const wdt=(Math.PI*2/N)*(.42+.3*v);
+      const tipx=cx+Math.cos(a0)*L, tipy=cy+Math.sin(a0)*L;
+      const c1x=cx+Math.cos(a0-wdt)*L*.55, c1y=cy+Math.sin(a0-wdt)*L*.55;
+      const c2x=cx+Math.cos(a0+wdt)*L*.55, c2y=cy+Math.sin(a0+wdt)*L*.55;
+      const pg=g.createLinearGradient(cx,cy,tipx,tipy);
+      pg.addColorStop(0,hexA(C,.03)); pg.addColorStop(.55,hexA(C,.10+.18*v)); pg.addColorStop(1,hexA(C,.02));
+      g.fillStyle=pg;
+      g.beginPath(); g.moveTo(cx,cy);
+      g.quadraticCurveTo(c1x,c1y,tipx,tipy);
+      g.quadraticCurveTo(c2x,c2y,cx,cy); g.closePath(); g.fill();
+      /* 꽃잎 끝 반짝 */
+      if(v>.42){ g.fillStyle=hexA(C,.25*v);
+        g.beginPath(); g.arc(tipx,tipy,m*.0035*(0.6+v),0,Math.PI*2); g.fill(); }
+    }
+    /* 중심 꽃술 */
+    let amp=0; for(let i=0;i<8;i++) amp+=getAmp(i,8,live); amp/=8;
+    const cr=r0*(.55+.35*amp);
+    const cg2=g.createRadialGradient(cx,cy,0,cx,cy,cr*2.2);
+    cg2.addColorStop(0,hexA(C,.6+.3*amp)); cg2.addColorStop(.45,hexA(C,.18)); cg2.addColorStop(1,hexA(C,0));
+    g.fillStyle=cg2; g.beginPath(); g.arc(cx,cy,cr*2.2,0,Math.PI*2); g.fill();
+    g.restore();
+    box=[cx-(r0+maxL), cy-(r0+maxL), (r0+maxL)*2, (r0+maxL)*2];
+
+  }else if(state.wave==='auroraband'){
+    /* 오로라 밴드 — 음악에 따라 일렁이는 빛의 띠 */
+    const span=w*.96*SW, xs=CX-span/2, pts=72, bandH=h*.13*SH;
+    g.save(); g.globalCompositeOperation='lighter';
+    for(let L=0;L<3;L++){
+      const ys=[], off=L*.7;
+      for(let i=0;i<=pts;i++){
+        const f=i/pts;
+        const v=getAmp(Math.floor(f*30), 30, live);
+        const env=Math.sin(Math.PI*f);
+        const wob=Math.sin(f*4.2+T*(.55+L*.18)+off)*.5+Math.sin(f*9.1-T*(.34+L*.1))*.2;
+        ys.push(CY - (v*.85+wob*.5+.15)*bandH*env*(1-L*.18));
+      }
+      /* 커튼 본체 */
+      g.beginPath(); g.moveTo(xs,CY+bandH*.5);
+      for(let i=0;i<=pts;i++) g.lineTo(xs+i/pts*span, ys[i]);
+      g.lineTo(xs+span,CY+bandH*.5); g.closePath();
+      const vg=g.createLinearGradient(0,CY-bandH,0,CY+bandH*.6);
+      vg.addColorStop(0,hexA(C,.20-L*.05)); vg.addColorStop(.55,hexA(C,.07)); vg.addColorStop(1,hexA(C,0));
+      g.fillStyle=vg; g.fill();
+      /* 상단 능선 */
+      g.beginPath();
+      for(let i=0;i<=pts;i++){ const x=xs+i/pts*span; i?g.lineTo(x,ys[i]):g.moveTo(x,ys[i]); }
+      g.strokeStyle=hexA(C,.30-L*.07); g.lineWidth=Math.max(1.5,m*.0022);
+      if(glowA){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB; }
+      g.stroke(); g.shadowBlur=0;
+    }
+    g.restore();
+    box=[xs, CY-bandH*1.2, span, bandH*1.9];
+
+  }else if(state.wave==='droplet'){
+    /* 물방울 — 비트마다 수면에 떨어져 튀는 방울과 파문 */
+    const bt=beatAt(live);
+    const span=w*.8*SW, xs=CX-span/2, surf=CY;
+    const LIFE=1.5;
+    while(beatEvents.length && T-beatEvents[0].t>LIFE) beatEvents.shift();
+    /* 수면선 */
+    const sg2=g.createLinearGradient(xs,0,xs+span,0);
+    sg2.addColorStop(0,hexA(C,0)); sg2.addColorStop(.5,hexA(C,.35)); sg2.addColorStop(1,hexA(C,0));
+    g.strokeStyle=sg2; g.lineWidth=Math.max(1.5,m*.0018);
+    g.beginPath(); g.moveTo(xs,surf); g.lineTo(xs+span,surf); g.stroke();
+    g.save(); g.globalCompositeOperation='lighter';
+    for(let k=0;k<beatEvents.length;k++){
+      const ev=beatEvents[k];
+      const age=(T-ev.t)/LIFE; if(age<0||age>1) continue;
+      const px=xs+span*(0.12+0.76*rand1(k*7.3+Math.floor(ev.t*10)));
+      const fade=1-age;
+      /* 낙하 → 착수 */
+      const dropP=Math.min(1,age/.30);
+      if(dropP<1){
+        const dy=-h*.13*SH*(1-dropP)*(1-dropP);
+        const rr=m*.006*(0.7+ev.s*.5);
+        g.fillStyle=hexA(C,.75*ev.s);
+        g.beginPath(); g.ellipse(px,surf+dy,rr*.8,rr*(1+ (1-dropP)*.5),0,0,Math.PI*2); g.fill();
+      }else{
+        /* 수면 파문 (타원) */
+        const p2=(age-.30)/.70;
+        const rw=m*.10*SW*Math.pow(p2,.7)*(0.6+ev.s*.7);
+        const a2=(1-p2)*(1-p2)*.55*ev.s;
+        if(a2>.006){
+          g.strokeStyle=hexA(C,a2); g.lineWidth=Math.max(1,(1-p2)*m*.0035);
+          g.beginPath(); g.ellipse(px,surf,rw,rw*.30,0,0,Math.PI*2); g.stroke();
+          g.strokeStyle=hexA(C,a2*.5);
+          g.beginPath(); g.ellipse(px,surf,rw*.62,rw*.19,0,0,Math.PI*2); g.stroke();
+        }
+        /* 튀는 물방울 */
+        if(p2<.45){
+          const sp=p2/.45, sy=surf-h*.055*SH*Math.sin(sp*Math.PI);
+          g.fillStyle=hexA(C,(1-sp)*.6*ev.s);
+          g.beginPath(); g.arc(px-m*.012*sp,sy,m*.0028,0,Math.PI*2); g.fill();
+          g.beginPath(); g.arc(px+m*.014*sp,sy+m*.004,m*.0022,0,Math.PI*2); g.fill();
+        }
+      }
+    }
+    g.restore();
+    box=[xs, surf-h*.16*SH, span, h*.24*SH];
+
+  }else if(state.wave==='constellation'){
+    /* 별자리 — 음악에 반응해 반짝이는 별과 이어지는 선 */
+    const N=26;
+    const span=w*.86*SW, xs=CX-span/2, hh=h*.17*SH;
+    const P=[];
+    for(let i=0;i<N;i++){
+      const v=getAmp(i,N,live);
+      const bx=xs+span*(i+.5)/N + Math.sin(T*.35+i*1.7)*m*.008;
+      const by=CY + (rand1(i*3.7)-.5)*hh*1.1 - v*hh*.55 + Math.cos(T*.28+i*2.1)*m*.006;
+      P.push({x:bx,y:by,v});
+    }
+    g.save(); g.globalCompositeOperation='lighter';
+    /* 가까운 별끼리 선으로 연결 */
+    const maxD=span/N*2.3;
+    g.lineWidth=Math.max(1,m*.0011);
+    for(let i=0;i<N;i++) for(let j=i+1;j<N;j++){
+      const dx=P[i].x-P[j].x, dy=P[i].y-P[j].y;
+      const d=Math.hypot(dx,dy); if(d>maxD) continue;
+      const a=(1-d/maxD)*.30*(.35+(P[i].v+P[j].v)*.5);
+      if(a<=.006) continue;
+      g.strokeStyle=hexA(C,a);
+      g.beginPath(); g.moveTo(P[i].x,P[i].y); g.lineTo(P[j].x,P[j].y); g.stroke();
+    }
+    /* 별 */
+    for(let i=0;i<N;i++){
+      const {x,y,v}=P[i];
+      const tw=.55+.45*Math.sin(T*(1.4+rand1(i+90)*2.2)+i);
+      const rr=m*(.0016+.0042*v)*(0.7+tw*.5);
+      const gg=g.createRadialGradient(x,y,0,x,y,rr*4.5);
+      gg.addColorStop(0,hexA(C,.85*(.4+v))); gg.addColorStop(.35,hexA(C,.25*v+.05)); gg.addColorStop(1,hexA(C,0));
+      g.fillStyle=gg; g.beginPath(); g.arc(x,y,rr*4.5,0,Math.PI*2); g.fill();
+      g.fillStyle=hexA(C,.9); g.beginPath(); g.arc(x,y,rr,0,Math.PI*2); g.fill();
+      /* 큰 별은 십자 광채 */
+      if(v>.55){ const L=rr*6*(v);
+        g.strokeStyle=hexA(C,.35*v); g.lineWidth=Math.max(.8,rr*.5);
+        g.beginPath(); g.moveTo(x-L,y); g.lineTo(x+L,y); g.moveTo(x,y-L); g.lineTo(x,y+L); g.stroke(); }
+    }
+    g.restore();
+    box=[xs, CY-hh, span, hh*2];
   }
   g.restore();
   if(R.preview&&box) HIT.push({id:'wave', x:box[0], y:box[1], w:box[2], h:box[3]});
@@ -5186,7 +5508,101 @@ function drawProgressBar(t){
   const cr=pb.style==='pill'? bh/2 : Math.min(bh/2, w*.004);
   const fw=Math.max(pb.style==='minimal'?0:cr*2, bw*clamp(progress,0,1));
   g.save();
+  /* ── 감성 스타일 (자체 렌더) ── */
+  const CUSTOM=['segment','dotline','wavebar','hairline','candy'].includes(pb.style);
+  if(CUSTOM){
+    const p=clamp(progress,0,1), cy=by+bh/2;
+    if(pb.style==='segment'){
+      /* 세그먼트 LED — 칸칸이 켜지는 이퀄라이저풍 눈금 */
+      const N=Math.max(12,Math.round(bw/(bh*1.5)));
+      const gap=bh*.34, sw=(bw-gap*(N-1))/N;
+      for(let i=0;i<N;i++){
+        const x=bx+i*(sw+gap), lit=(i+1)/N<=p, edge=Math.abs((i+.5)/N-p)<1/N;
+        if(lit||edge){
+          g.save();
+          if(edge){ g.shadowColor=hexA(pb.colorFill,.9); g.shadowBlur=bh*1.6; }
+          g.fillStyle=hexA(pb.colorFill, edge?1:.88);
+          roundRect(g,x,by,sw,bh,Math.min(sw,bh)*.28); g.fill();
+          g.restore();
+        }else{
+          g.fillStyle=hexA(pb.colorBg,.16);
+          roundRect(g,x,by,sw,bh,Math.min(sw,bh)*.28); g.fill();
+        }
+      }
+    }else if(pb.style==='dotline'){
+      /* 도트 라인 — 점들이 차오르고 현재 지점이 크게 빛남 */
+      const N=Math.max(14,Math.round(bw/(bh*2.2)));
+      const step=bw/(N-1), r=bh*.30;
+      g.strokeStyle=hexA(pb.colorBg,.20); g.lineWidth=Math.max(1,bh*.10);
+      g.beginPath(); g.moveTo(bx,cy); g.lineTo(bx+bw,cy); g.stroke();
+      g.strokeStyle=hexA(pb.colorFill,.75); g.lineWidth=Math.max(1,bh*.12);
+      g.beginPath(); g.moveTo(bx,cy); g.lineTo(bx+bw*p,cy); g.stroke();
+      for(let i=0;i<N;i++){
+        const x=bx+i*step, f=i/(N-1), on=f<=p;
+        g.fillStyle=on? hexA(pb.colorFill,.95) : hexA(pb.colorBg,.28);
+        g.beginPath(); g.arc(x,cy,on?r:r*.62,0,Math.PI*2); g.fill();
+      }
+      const hx=bx+bw*p;
+      g.save(); g.globalCompositeOperation='lighter';
+      const hg=g.createRadialGradient(hx,cy,0,hx,cy,bh*1.5);
+      hg.addColorStop(0,hexA(pb.colorFill,.9)); hg.addColorStop(1,hexA(pb.colorFill,0));
+      g.fillStyle=hg; g.beginPath(); g.arc(hx,cy,bh*1.5,0,Math.PI*2); g.fill();
+      g.restore();
+      g.fillStyle='#fff'; g.beginPath(); g.arc(hx,cy,r*.85,0,Math.PI*2); g.fill();
+    }else if(pb.style==='wavebar'){
+      /* 물결 — 사인파가 흐르며 차오름 */
+      g.fillStyle=hexA(pb.colorBg,.14);
+      roundRect(g,bx,by,bw,bh,bh/2); g.fill();
+      g.save(); roundRect(g,bx,by,bw,bh,bh/2); g.clip();
+      const amp=bh*.30, fw2=bw*p;
+      for(let L=0;L<2;L++){
+        g.beginPath(); g.moveTo(bx,by+bh);
+        for(let x=0;x<=fw2;x+=3){
+          const y=cy + Math.sin((x/bh)*.9 + T*(2.2+L*.9) + L*1.6)*amp*(L?.6:1);
+          x?g.lineTo(bx+x,y):g.moveTo(bx+x,y);
+        }
+        g.lineTo(bx+fw2,by+bh); g.lineTo(bx,by+bh); g.closePath();
+        g.fillStyle=hexA(pb.colorFill, L? .35 : .8); g.fill();
+      }
+      g.restore();
+      g.strokeStyle=hexA(pb.colorFill,.35); g.lineWidth=Math.max(1,bh*.07);
+      roundRect(g,bx,by,bw,bh,bh/2); g.stroke();
+    }else if(pb.style==='hairline'){
+      /* 헤어라인 — 아주 가는 선 + 부드러운 진행 광점 (미니멀 감성) */
+      const lw=Math.max(1,bh*.16);
+      g.strokeStyle=hexA(pb.colorBg,.22); g.lineWidth=lw;
+      g.beginPath(); g.moveTo(bx,cy); g.lineTo(bx+bw,cy); g.stroke();
+      const lg2=g.createLinearGradient(bx,0,bx+bw*p,0);
+      lg2.addColorStop(0,hexA(pb.colorFill,.25)); lg2.addColorStop(1,hexA(pb.colorFill,1));
+      g.strokeStyle=lg2; g.lineWidth=lw*1.5;
+      g.beginPath(); g.moveTo(bx,cy); g.lineTo(bx+bw*p,cy); g.stroke();
+      const hx=bx+bw*p;
+      g.save(); g.globalCompositeOperation='lighter';
+      const hg2=g.createRadialGradient(hx,cy,0,hx,cy,bh*2.2);
+      hg2.addColorStop(0,hexA(pb.colorFill,.85)); hg2.addColorStop(.4,hexA(pb.colorFill,.25)); hg2.addColorStop(1,hexA(pb.colorFill,0));
+      g.fillStyle=hg2; g.beginPath(); g.arc(hx,cy,bh*2.2,0,Math.PI*2); g.fill();
+      g.restore();
+    }else{
+      /* 캔디 — 흐르는 사선 스트라이프 */
+      g.fillStyle=hexA(pb.colorBg,.16);
+      roundRect(g,bx,by,bw,bh,bh/2); g.fill();
+      g.save(); roundRect(g,bx,by,bw*p,bh,bh/2); g.clip();
+      const fg2=g.createLinearGradient(bx,0,bx+bw,0);
+      fg2.addColorStop(0,hexA(pb.colorFill,.75)); fg2.addColorStop(1,hexA(pb.colorFill,1));
+      g.fillStyle=fg2; g.fillRect(bx,by,bw*p,bh);
+      const sp=bh*1.1, off=(T*bh*.9)%(sp*2);
+      g.strokeStyle='rgba(255,255,255,.22)'; g.lineWidth=sp*.55;
+      for(let x=bx-bh*2-off; x<bx+bw*p+bh*2; x+=sp*2){
+        g.beginPath(); g.moveTo(x,by+bh*1.4); g.lineTo(x+bh*1.4,by-bh*.4); g.stroke();
+      }
+      const gl2=g.createLinearGradient(bx,by,bx,by+bh*.55);
+      gl2.addColorStop(0,'rgba(255,255,255,.34)'); gl2.addColorStop(1,'rgba(255,255,255,0)');
+      g.fillStyle=gl2; g.fillRect(bx,by,bw*p,bh*.55);
+      g.restore();
+    }
+  }
   /* ── 배경 트랙 (재질별) ── */
+  if(!CUSTOM){
   if(pb.style==='glass'){
     const gr=g.createLinearGradient(bx,by,bx,by+bh);
     gr.addColorStop(0,hexA(pb.colorBg,.34)); gr.addColorStop(.5,hexA(pb.colorBg,.12)); gr.addColorStop(1,hexA(pb.colorBg,.24));
@@ -5231,6 +5647,7 @@ function drawProgressBar(t){
       g.fillRect(bx,by,fw,bh);
     }
     g.restore();
+  }
   }
   /* 텍스트 */
   const fs=Math.max(9,bh*.85);
@@ -6173,6 +6590,8 @@ document.addEventListener('keydown',e=>{
   if(tag==='input'||tag==='textarea'||tag==='select') return;
   if(e.code==='Space'){ e.preventDefault(); togglePlay(); }
   else if(e.key==='Delete'||e.key==='Backspace'){ if(state.sel){ e.preventDefault(); delSel(); } }
+  else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){ e.preventDefault(); selectAllClips(); }
+  else if(e.key==='Escape'){ if(state.selSet.length||state.sel){ setSelOne(null); renderTL(); propsRender(); } }
   else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey? redo():undo(); }
   else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); }
   else if(e.key.toLowerCase()==='s'&&!e.ctrlKey&&!e.metaKey){ splitSel(); }
@@ -6205,15 +6624,55 @@ document.querySelectorAll('.grad-chip').forEach(g2=>g2.addEventListener('click',
   $('bgControls').classList.remove('show'); drawNow();
 }));
 $('bgImageBtn').addEventListener('click',()=>$('bgFileInput').click());
-$('bgFileInput').addEventListener('change',e=>{
-  const f=e.target.files[0]; if(!f) return;
-  const img=new Image();
-  img.onload=()=>{ state.bg.type='image'; state.bg.img=img; state.bg.file=f;
+/* 배경 이미지 적용 (파일 선택·드래그앤드롭·갤러리 공용) */
+function applyBgImage(file, imgMaybe){
+  const use=img=>{ state.bg.type='image'; state.bg.img=img; state.bg.file=file||null;
     document.querySelectorAll('.grad-chip').forEach(c=>c.classList.remove('on'));
     $('bgImageBtn').classList.add('on');
-    $('bgControls').classList.add('show'); drawNow(); };
-  img.src=URL.createObjectURL(f);
+    $('bgControls').classList.add('show');
+    renderBgPicker(); drawNow(); };
+  if(imgMaybe&&imgMaybe.complete!==false){ use(imgMaybe); return; }
+  const img=new Image();
+  img.onload=()=>use(img);
+  img.onerror=()=>setStatus('이미지를 불러오지 못했습니다.');
+  img.src=URL.createObjectURL(file);
+}
+$('bgFileInput').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  applyBgImage(f); e.target.value='';
 });
+/* 미리보기로 이미지 파일을 끌어다 놓으면 배경으로 */
+{
+  const pw=document.querySelector('.preview-wrap');
+  const stop=e=>{ e.preventDefault(); e.stopPropagation(); };
+  ['dragenter','dragover'].forEach(ev=>pw.addEventListener(ev,e=>{
+    if(![...(e.dataTransfer?.types||[])].includes('Files')) return;
+    stop(e); e.dataTransfer.dropEffect='copy'; pw.classList.add('dragover'); }));
+  ['dragleave','dragend'].forEach(ev=>pw.addEventListener(ev,e=>{ pw.classList.remove('dragover'); }));
+  pw.addEventListener('drop',e=>{
+    const fs=[...(e.dataTransfer?.files||[])];
+    const img=fs.find(f=>/^image\//.test(f.type));
+    if(!img) return;                       /* 이미지가 아니면 기본 동작(미디어 추가)에 맡김 */
+    stop(e); pw.classList.remove('dragover');
+    applyBgImage(img);
+    setStatus(`배경 이미지 적용: ${img.name}`);
+  });
+}
+/* 가져온 이미지에서 배경 고르기 */
+function renderBgPicker(){
+  const row=$('bgPickRow'), lab=$('bgPickLab'); if(!row) return;
+  const imgs=[...state.assets.values()].filter(a=>a.kind==='image'&&a.img);
+  row.innerHTML='';
+  lab.style.display=imgs.length?'':'none';
+  for(const a of imgs){
+    const b=document.createElement('button');
+    b.className='bgth'+(state.bg.type==='image'&&state.bg.img===a.img?' on':'');
+    b.title=a.name;
+    try{ b.style.backgroundImage=`url(${a.thumb||URL.createObjectURL(a.blob)})`; }catch(_){}
+    b.addEventListener('click',()=>{ applyBgImage(a.blob||null, a.img); });
+    row.appendChild(b);
+  }
+}
 function bindSlider(id, valId, fn, suffix='%'){
   const r=$(id);
   r.addEventListener('input',e=>{ const v=+e.target.value;
@@ -6319,7 +6778,7 @@ $('waveRow').addEventListener('click',e=>{
   const b=e.target.closest('.chip'); if(!b) return;
   [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
   state.wave=b.dataset.wv;
-  const defs={circle:.5, radial:.5, orbit2:.5, mirror:.6, strings:.6, reflect:.6, flow:.6, line:.64, ribbon:.64, dots:.72, arc:.72, bars:.74, peaks:.74, spectrum:.78, skyline:.78};
+  const defs={circle:.5, radial:.5, orbit2:.5, bloom:.5, constellation:.52, mirror:.6, strings:.6, reflect:.6, flow:.6, silk:.6, line:.64, ribbon:.64, droplet:.68, dots:.72, arc:.72, bars:.74, peaks:.74, auroraband:.76, spectrum:.78, skyline:.78};
   if(state.wave!=='off'){
     state.el.wave.y = defs[state.wave] ?? .74;
     state.el.wave.x = .5;
@@ -6572,7 +7031,7 @@ async function startExport(){
       aEnc.configure(aCfg);
     }
     /* 비디오 준비 */
-    smoothVals.fill(0); peakVals.fill(0); magPrev.fill(0); bassSm=0; agcGain=1; agcTGain=1;
+    smoothVals.fill(0); peakVals.fill(0); magPrev.fill(0); bassSm=0; agcGain=1; agcTGain=1; resetBeat();
     pauseAllVideos();
     const totalFrames=Math.ceil(outDur*FPS);
     const hasVideoClips=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
