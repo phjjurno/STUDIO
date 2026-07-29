@@ -2784,6 +2784,19 @@ function makeGrainTile(n){
   cx.putImageData(img,0,0); return c;
 }
 const yieldTask=()=>new Promise(r=>{const c=new MessageChannel();c.port1.onmessage=()=>r();c.port2.postMessage(0);});
+/* 인코더 백프레셔 대기 — 큐가 빌 때까지 기다리는 방식.
+   setTimeout은 중첩 5단계부터 브라우저가 최소 4ms로 강제 지연(클램프)하는데,
+   프레임마다 이 루프를 도니 실측 대기가 프레임당 37ms까지 늘어 렌더가 0.9배속으로 떨어졌다.
+   → dequeue 이벤트로 즉시 깨어나고, 미지원 브라우저는 클램프 없는 MessageChannel 양보로 대체. */
+function encWait(enc){
+  if(!('ondequeue' in enc)) return yieldTask();
+  return new Promise(r=>{
+    let done=false;
+    const fin=()=>{ if(done) return; done=true; enc.ondequeue=null; clearTimeout(to); r(); };
+    const to=setTimeout(fin,50);          /* 이벤트 유실 대비 안전망 (타이머는 반드시 해제) */
+    enc.ondequeue=fin;
+  });
+}
 const withTimeout=(p,ms,msg)=>{ let to; return Promise.race([
   Promise.resolve(p).finally(()=>clearTimeout(to)),
   new Promise((_,rej)=>{ to=setTimeout(()=>rej(new Error(msg)),ms); })
@@ -7349,10 +7362,13 @@ async function startExport(){
   const outDur=exEnd-exStart;
   const fadeIn=clamp(exp.fadeIn||0, 0, outDur/2);
   const fadeOut=clamp(exp.fadeOut||0, 0, outDur/2);
-  /* 코덱 확인 — 속도 우선: realtime 모드 + 하드웨어 인코더 우선 선택 */
+  /* 코덱 확인 — 하드웨어 인코더 우선 선택
+     latencyMode는 'quality': 파일 저장(오프라인)에서는 인코더가 프레임을 여러 장
+     동시에 물고 처리해 처리량이 realtime의 약 2배. realtime은 실시간 송출용이라
+     인플라이트 프레임을 제한해 오히려 렌더가 느려짐 */
   const vCfg={codec:(W>=3840||H>=2160)?'avc1.640033':'avc1.64002A',
     width:W,height:H,bitrate:Math.round(W*H*(FPS===60?3.4:2.8)),framerate:FPS,
-    latencyMode:'realtime'};
+    latencyMode:'quality'};
   /* 가장 빠른(하드웨어) 경로부터 순서대로 지원 여부 확인 */
   {
     let chosen=null;
@@ -7463,7 +7479,9 @@ async function startExport(){
           const ad=new AudioData({format:'f32-planar',sampleRate:48000,numberOfFrames:n,
             numberOfChannels:2,timestamp:Math.round(audioTs),data:plane.subarray(0,n*2)});
           aEnc.encode(ad); ad.close(); audioTs+=n/48000*1e6;
-          let ag=0; while(aEnc.encodeQueueSize>24 && !state.cancelRender && !encErr && ag++<2000) await new Promise(r=>setTimeout(r,6));
+          const aw0=performance.now();
+          while(aEnc.encodeQueueSize>24 && !state.cancelRender && !encErr && performance.now()-aw0<12000)
+            await encWait(aEnc);
         }
       }
       /* 영상: 출력 프레임 ot=fNext/FPS → 타임라인 t=exStart+ot */
@@ -7478,9 +7496,9 @@ async function startExport(){
           if(bf>0){ rg.save(); rg.globalAlpha=Math.min(1,bf); rg.fillStyle='#000'; rg.fillRect(0,0,W,H); rg.restore(); } }
         const vf=new VideoFrame(rcanvas,{timestamp:Math.round(fNext*1e6/FPS),duration:Math.round(1e6/FPS)});
         vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
-        let guard=0;
-        while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && guard++<2500)
-          await new Promise(r=>setTimeout(r,4));
+        const vw0=performance.now();
+        while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && performance.now()-vw0<10000)
+          await encWait(vEnc);
         if(fNext%15===0){
           const pct=fNext/totalFrames, spd=(fNext/FPS)/((performance.now()-t0)/1000);
           const eta=spd>0?(outDur-fNext/FPS)/spd:0;
