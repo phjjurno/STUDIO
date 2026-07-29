@@ -3738,9 +3738,11 @@ function beatAt(live){
   }
   return {b, hit};
 }
-function roundRect(g,x,y,w,h,r){ g.beginPath();
+/* 경로만 덧붙이는 형태 — 여러 도형을 한 경로에 모아 fill()을 1회로 줄일 때 사용 */
+function roundRectPath(g,x,y,w,h,r){
   g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r);
   g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+function roundRect(g,x,y,w,h,r){ g.beginPath(); roundRectPath(g,x,y,w,h,r); }
 /* ───────── 배경 (모션 포함) ───────── */
 function drawBackground(){
   const {g,w,h,T}=R;
@@ -4536,28 +4538,44 @@ function drawWave(live){
     const maxH=h*(mirror? .16 : .26)*SH;
     const grad=g.createLinearGradient(0,base-maxH,0,base);
     grad.addColorStop(0,hexA(C,.98)); grad.addColorStop(1,hexA(C,.30));
-    g.fillStyle=grad;
-    if(glowA){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB; }
+    const BH=new Array(N);
     for(let i=0;i<N;i++){
       const env=.3+.7*Math.sin(Math.PI*i/(N-1));
       const v=getAmp(i,N,live)*env;
-      const bh=Math.max(bw, v*maxH);
-      const x=x0+i*unit;
-      roundRect(g,x,base-bh,bw,bh,bw/2); g.fill();
-      if(mirror){
-        const rg=g.createLinearGradient(0,base+bw,0,base+bh*.85);
-        rg.addColorStop(0,hexA(C,.34)); rg.addColorStop(1,hexA(C,0));
-        const prev=g.fillStyle; g.fillStyle=rg; g.shadowBlur=0;
-        roundRect(g,x,base+bw*.6,bw,bh*.85,bw/2); g.fill();
-        g.fillStyle=prev; if(glowA) g.shadowBlur=glowB;
-      }
-      if(peaks){
-        if(v>peakVals[i]) peakVals[i]=v; else peakVals[i]=Math.max(0,peakVals[i]-.008);
-        const py=base - Math.max(bw, peakVals[i]*maxH) - bw*1.8;
-        const prev=g.fillStyle; g.fillStyle=hexA(C,.95);
-        roundRect(g,x,py,bw,bw*.9,bw/2); g.fill(); g.fillStyle=prev;
+      BH[i]=Math.max(bw, v*maxH);
+      if(peaks){ if(v>peakVals[i]) peakVals[i]=v; else peakVals[i]=Math.max(0,peakVals[i]-.008); }
+    }
+    /* 막대를 G개 그룹으로 번갈아 묶어 그림자 fill을 N회 → G회로 줄인다.
+       예전엔 막대마다 그림자를 켠 채 fill()을 호출해 프레임당 블러 패스가 52~64번 발생,
+       글로우 최대에서 내보내기가 1.3~2.8배속까지 떨어졌다.
+       그룹 간격(G*unit)을 글로우 지름보다 넓게 잡아 이웃 글로우 누적은 원본과 같게 유지. */
+    const G=glowA? clamp(Math.ceil(2*glowB/Math.max(1,unit))+1,1,8) : 1;
+    g.fillStyle=grad;
+    if(glowA){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB; }
+    for(let s=0;s<G;s++){
+      g.beginPath();
+      for(let i=s;i<N;i+=G) roundRectPath(g,x0+i*unit,base-BH[i],bw,BH[i],bw/2);
+      g.fill();
+    }
+    if(peaks){                        /* 피크 캡 — 색이 같아 한 경로로 묶임 */
+      g.fillStyle=hexA(C,.95);
+      for(let s=0;s<G;s++){
+        g.beginPath();
+        for(let i=s;i<N;i+=G)
+          roundRectPath(g,x0+i*unit,base-Math.max(bw,peakVals[i]*maxH)-bw*1.8,bw,bw*.9,bw/2);
+        g.fill();
       }
     }
+    if(mirror){                       /* 반사는 막대마다 그라디언트가 달라 개별 fill (그림자 없음) */
+      g.shadowBlur=0;
+      for(let i=0;i<N;i++){
+        const rg=g.createLinearGradient(0,base+bw,0,base+BH[i]*.85);
+        rg.addColorStop(0,hexA(C,.34)); rg.addColorStop(1,hexA(C,0));
+        g.fillStyle=rg;
+        roundRect(g,x0+i*unit,base+bw*.6,bw,BH[i]*.85,bw/2); g.fill();
+      }
+    }
+    g.shadowBlur=0;
     box=[CX-usable/2, base-maxH, usable, maxH+(mirror? maxH*.85: 0)];
 
   }else if(state.wave==='dots'){
@@ -4670,15 +4688,24 @@ function drawWave(live){
     const cx=CX, cy=CY, r0=m*.17*S2, N=88, maxL=m*.11*SH;
     g.lineCap='round';
     if(glowA){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB; }
+    g.lineWidth=Math.max(2, m*.006);
+    /* 살의 색은 v에만 좌우되므로 8단계로 묶어 그림자 stroke를 88회 → 최대 8회로.
+       (막대 파형과 같은 병목 — 획마다 블러 패스가 생겨 글로우 최대에서 1.9배속까지 떨어졌다) */
+    const RB=16, rb=new Array(RB);
     for(let i=0;i<N;i++){
-      const a=i/N*Math.PI*2-Math.PI/2;
       const v=getAmp(i%(N/2), N/2, live);
-      const L=Math.max(m*.008, v*maxL);
-      g.lineWidth=Math.max(2, m*.006);
-      g.strokeStyle=hexA(C, .45+.55*v);
+      const b=Math.min(RB-1, Math.floor(v*RB));
+      (rb[b]||(rb[b]=[])).push(i,v);
+    }
+    for(let b=0;b<RB;b++){
+      const arr=rb[b]; if(!arr) continue;
+      g.strokeStyle=hexA(C, .45+.55*((b+.5)/RB));
       g.beginPath();
-      g.moveTo(cx+Math.cos(a)*r0, cy+Math.sin(a)*r0);
-      g.lineTo(cx+Math.cos(a)*(r0+L), cy+Math.sin(a)*(r0+L));
+      for(let k=0;k<arr.length;k+=2){
+        const a=arr[k]/N*Math.PI*2-Math.PI/2, L=Math.max(m*.008, arr[k+1]*maxL);
+        g.moveTo(cx+Math.cos(a)*r0, cy+Math.sin(a)*r0);
+        g.lineTo(cx+Math.cos(a)*(r0+L), cy+Math.sin(a)*(r0+L));
+      }
       g.stroke();
     }
     g.shadowBlur=0; g.strokeStyle=hexA(C,.2); g.lineWidth=1.5;
