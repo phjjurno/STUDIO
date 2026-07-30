@@ -5870,6 +5870,80 @@ async function seekVideosAt(t){
   });
   if(waits.length) await Promise.all(waits);
 }
+/* ───────── 내보내기용 영상 프레임 정렬 ─────────
+   프레임마다 currentTime을 대입하면 브라우저가 매번 탐색(seek)을 한다. 4K 소스에서
+   탐색 한 번이 140ms 이상(실측)이라 60fps 내보내기가 0.18배속까지 떨어졌다.
+   내보내기는 시간이 앞으로만 흐르므로 소스를 '재생'시켜 순차 디코딩하게 두고,
+   필요한 시각에 도달할 때까지만 기다린다. 같은 4K 소스가 재생으로는 1초에 4.8초
+   분량을 디코딩(실측)해서 탐색 대비 수십 배 빠르다.
+   되감기·큰 점프(클립 경계 등)에서만 예외적으로 탐색을 1회 쓴다. */
+/* 소스가 목표보다 이만큼 앞서면 정지시킨다. 이 폭이 그대로 프레임 오차(영상이
+   오디오보다 앞서는 양)의 상한이 되므로 한 프레임 남짓으로 좁게 잡는다. */
+const VID_AHEAD_MAX=.022;
+/* 내보내기가 실제로 소모하는 속도(소스 초/실시간 초)를 추정해 재생 배속을 맞춘다.
+   잔여 오차만 보고 배속을 정하면 거의 따라잡았을 때 배속이 0.5까지 떨어져
+   정작 필요한 처리량에 못 미친다(실측 평균 0.81배 → 4K60이 0.53배속). */
+let vidRateEma=1.2, vidPrevT=-1, vidPrevWall=0;
+function vidResetPace(){ vidRateEma=1.2; vidPrevT=-1; vidPrevWall=0; }
+function vidPace(t){
+  const now=performance.now();
+  if(vidPrevT>=0 && t>vidPrevT){
+    const dw=(now-vidPrevWall)/1000;
+    if(dw>0.0005 && dw<1){
+      vidRateEma += (clamp((t-vidPrevT)/dw,.05,16)-vidRateEma)*.15;
+    }
+  }
+  vidPrevT=t; vidPrevWall=now;
+  return vidRateEma;
+}
+/* 목표 시각 도달만 기다리고 정지시키지는 않는다. 프레임마다 정지·재생을 반복하면
+   그 비용으로 4K60이 0.5배속까지 떨어졌다(실측). 대신 앞선 정도를 위에서 제한한다. */
+function waitVideoTime(v, st, deadlineMs){
+  return new Promise(res=>{
+    const t0=performance.now();
+    const tick=()=>{
+      if(v.currentTime>=st || v.ended || v.paused || performance.now()-t0>deadlineMs){ res(); return; }
+      yieldTask().then(tick);        /* setTimeout은 숨은 탭에서 1초로 묶이므로 사용하지 않음 */
+    };
+    tick();
+  });
+}
+async function advanceVideosTo(t){
+  const waits=[], pace=vidPace(t);
+  /* 같은 소스 파일을 여러 컷이 나눠 쓰는 건 흔한 구성이다. 컷마다 따로 제어하면
+     비활성 컷이 매 프레임 그 요소를 정지시켜 활성 컷과 싸우게 되고, 정지·재생이
+     프레임마다 반복돼 4K60이 0.11배속까지 떨어진다(실측).
+     그래서 소스 하나당 '지금 그려질 컷' 한 개만 골라 제어한다. */
+  const act=new Map();
+  eachVideoClip((c,tr,a)=>{
+    if(!(t>=c.start && t<clipVisibleEnd(c,tr))) return;
+    const prev=act.get(a);
+    if(!prev || c.start>prev.start) act.set(a,c);      /* 전환으로 겹치면 나중 컷 기준 */
+  });
+  eachVideoClip((c,tr,a)=>{                            /* 아무 컷도 안 쓰는 소스만 정지 */
+    if(!act.has(a) && !a.videoEl.paused) a.videoEl.pause();
+  });
+  for(const [a,c] of act){
+    const v=a.videoEl;
+    const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
+    const cur=v.currentTime, drift=st-cur;
+    if(a.noPlay || drift<-.1 || drift>1.5){         /* 큰 되감기·컷 경계 점프·재생 불가 → 탐색 1회 */
+      if(!v.paused) v.pause();
+      waits.push(seekVideo(v,st));
+      continue;
+    }
+    /* 많이 앞섰으면 정지해 따라오기를 기다린다. 감속만 하면 내보내기가 실시간보다
+       느릴 때 소스가 계속 앞질러 매 프레임 재탐색이 일어난다(초기 구현의 실패 원인). */
+    if(drift <= -VID_AHEAD_MAX){ if(!v.paused) v.pause(); continue; }
+    if(drift <= 0) continue;                /* 조금 앞섬 — 그 프레임을 그대로 쓴다 */
+    /* 필요 처리량(추정)에 1.5배 여유만 준다. 더 높이면 한 프레임 그리는 동안
+       크게 앞질러 오차가 커지고, 낮으면 매 프레임 기다리게 된다. */
+    v.playbackRate=clamp(pace*1.5*clamp(c.speed,.25,4), .5, 8);
+    if(v.paused) v.play().catch(()=>{ a.noPlay=true; });   /* 재생이 막히면 탐색 방식으로 복귀 */
+    waits.push(waitVideoTime(v, st, 400));
+  }
+  if(waits.length) await Promise.all(waits);
+}
 
 function play(){
   if(state.playing||state.rendering) return;
@@ -7597,6 +7671,8 @@ async function startExport(){
     }
     /* 비디오 준비 */
     smoothVals.fill(0); peakVals.fill(0); magPrev.fill(0); bassSm=0; agcGain=1; agcTGain=1; resetBeat();
+    vidResetPace();
+    eachVideoClip((c,tr,a)=>{ a.noPlay=false; });
     pauseAllVideos();
     const totalFrames=Math.ceil(outDur*FPS);
     const hasVideoClips=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
@@ -7638,16 +7714,20 @@ async function startExport(){
       const fEnd=Math.min(totalFrames, Math.round(segE*FPS));
       for(; fNext<fEnd && !state.cancelRender && !encErr; fNext++){
         const ot=fNext/FPS, t=exStart+ot;
-        if(hasVideoClips) await seekVideosAt(t);
+        /* 영상 소스 전진을 먼저 걸어 두고 인코더 백프레셔 대기와 겹친다.
+           둘을 순서대로 기다리면 프레임당 8ms(소스 디코딩)+13ms(인코더)가 더해져
+           인코더 상한보다 느려진다. 겹치면 둘 중 큰 쪽만 든다. */
+        const vidP = hasVideoClips? advanceVideosTo(t) : null;
+        const bw0=performance.now();
+        while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && performance.now()-bw0<10000)
+          await encWait(vEnc);
+        if(vidP) await vidP;
         computeSpectrum(specSrc, clamp(t-from, 0, span-.02));
         drawFrame(t, true, rg, W, H, false);
         if(fadeIn>0||fadeOut>0){ const bf=1-fadeF(ot);   /* 화면 검정 페이드 */
           if(bf>0){ rg.save(); rg.globalAlpha=Math.min(1,bf); rg.fillStyle='#000'; rg.fillRect(0,0,W,H); rg.restore(); } }
         const vf=new VideoFrame(rcanvas,{timestamp:Math.round(fNext*1e6/FPS),duration:Math.round(1e6/FPS)});
         vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
-        const vw0=performance.now();
-        while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && performance.now()-vw0<10000)
-          await encWait(vEnc);
         if(fNext%15===0){
           const pct=fNext/totalFrames, spd=(fNext/FPS)/((performance.now()-t0)/1000);
           const eta=spd>0?(outDur-fNext/FPS)/spd:0;
@@ -7702,6 +7782,8 @@ async function startExport(){
     offerRealtime('');
   }finally{
     state.rendering=false; state.cancelRender=false;
+    pauseAllVideos();                 /* 순차 재생으로 돌린 소스를 반드시 멈춘다 */
+    eachVideoClip((c,tr,a)=>{ a.videoEl.playbackRate=1; });
     $('exportBtn').disabled=false; $('playBtn').disabled=false;
     $('stopBtn').style.display='none';
     drawNow();
