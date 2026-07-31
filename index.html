@@ -6384,8 +6384,8 @@ function drawLP(t, c, idx, cs, a){
      피벗이 우상단이라 시계방향(+)으로 돌려야 헤드셸이 레코드 위로 들어간다.
      재생 중에는 바깥 그루브에서 안쪽으로 서서히 이동. */
   const prog=clamp(lt/Math.max(.001, clipEnd(c)-c.start), 0, 1);
-  /* 36° = 판 반경의 0.62 지점(바깥 그루브), +8° 더 돌면 0.42(라벨 직전)까지 안쪽으로 */
-  const PLAY_DEG=36, DRIFT_DEG=8;                /* 착지각 · 재생 중 안쪽 이동량 */
+  /* 28° = 판 반경의 0.82 지점(바깥 그루브), +10° 더 돌면 0.57까지 서서히 안쪽으로 */
+  const PLAY_DEG=28, DRIFT_DEG=10;               /* 착지각 · 재생 중 안쪽 이동량 */
   const armDeg=(PLAY_DEG+DRIFT_DEG*prog)*armF;
   const armLift=(1-armF)*drawH*.02;              /* 들릴 때 살짝 떠오름 */
 
