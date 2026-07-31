@@ -6380,10 +6380,12 @@ function drawLP(t, c, idx, cs, a){
   let armF=1;                                    /* 1=재생(판 위) · 0=대기(우측) */
   if(lt<IN_ARM) armF=eOut((lt-.25)/(IN_ARM-.25));
   if(rem<OUT_ARM) armF=Math.min(armF, eOut(rem/OUT_ARM));
-  /* 피벗이 우상단이라 캔버스 기준 시계방향(+)은 헤드셸을 레코드 쪽으로 밀어넣는다.
-     대기 위치는 레코드 바깥(오른쪽)이어야 하므로 음수로 회전시킨다. */
-  const REST_DEG=-22;                            /* 대기 시 바깥으로 벌어지는 각 */
-  const armDeg=REST_DEG*(1-armF);
+  /* 원본 사진의 톤암은 이미 '판 밖 거치대' 자세다. 따라서 0°가 대기이고,
+     피벗이 우상단이라 시계방향(+)으로 돌려야 헤드셸이 레코드 위로 들어간다.
+     재생 중에는 바깥 그루브에서 안쪽으로 서서히 이동. */
+  const prog=clamp(lt/Math.max(.001, clipEnd(c)-c.start), 0, 1);
+  const PLAY_DEG=26, DRIFT_DEG=6;                /* 착지각 · 재생 중 안쪽 이동량 */
+  const armDeg=(PLAY_DEG+DRIFT_DEG*prog)*armF;
   const armLift=(1-armF)*drawH*.02;              /* 들릴 때 살짝 떠오름 */
 
   const spin=t*3.49;                             /* 33⅓ RPM */
