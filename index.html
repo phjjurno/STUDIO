@@ -200,6 +200,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #shList .shrow.done{border-color:#3f7d55}
 #shList .shrow.cur{border-color:var(--amber)}
 #shHookList .hk-item{text-align:left;justify-content:flex-start;padding:7px 10px;font-size:12.5px}
+.stepper{display:flex;align-items:center;gap:3px}
+.stepper .st{padding:4px 9px;font-size:14px;line-height:1;font-weight:700}
 .hkrow{display:flex;gap:4px;align-items:stretch}
 .hkrow .hk-item{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hkrow .mini{background:none;border:1px solid var(--line);border-radius:8px;color:var(--dim);
@@ -677,17 +679,27 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="row" style="margin-top:8px;gap:8px;align-items:center">
         <label style="font-size:12px;color:var(--dim);flex:1;min-width:0">폰트
           <select id="shFont" style="width:100%"></select></label>
-        <label style="font-size:12px;color:var(--dim)">크기
-          <input type="number" class="snum" id="shSize" min="50" max="260" step="5" value="125" style="width:58px"><small class="usuf">%</small></label>
+        <span style="font-size:12px;color:var(--dim)">크기</span>
+        <div class="stepper">
+          <button class="chip st" id="shSizeDn" title="작게">−</button>
+          <input type="number" class="snum" id="shSize" min="50" max="260" step="5" value="125" style="width:50px">
+          <button class="chip st" id="shSizeUp" title="크게">＋</button>
+          <small class="usuf">%</small>
+        </div>
       </div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
         <span class="hint2" style="margin:0">스타일</span>
         <div class="row" id="shStyleRow" style="gap:4px"></div>
       </div>
       <div class="row" style="margin-top:6px;gap:6px;align-items:center">
-        <span class="hint2" style="margin:0">색</span>
+        <span class="hint2" id="shColorLab" style="margin:0;min-width:38px">색</span>
         <div class="row" id="shColorRow" style="gap:4px"></div>
         <label class="colorpick" style="margin-left:2px"><input type="color" id="shColorCustom" value="#FFD400">직접</label>
+      </div>
+      <div class="row" id="shColor2Wrap" style="margin-top:6px;gap:6px;align-items:center">
+        <span class="hint2" style="margin:0;min-width:38px">아랫줄</span>
+        <div class="row" id="shColor2Row" style="gap:4px"></div>
+        <label class="colorpick" style="margin-left:2px"><input type="color" id="shColor2Custom" value="#FFFFFF">직접</label>
       </div>
       <div class="row" style="margin-top:6px;gap:6px;align-items:center">
         <span class="hint2" style="margin:0">등장</span>
@@ -6671,20 +6683,23 @@ function drawOverlays(t){
         const sizes=scales.map(k=>Math.round(fs*k));
         const gap=fs*.16;
         let totH=0; sizes.forEach(fz=>totH+=fz*1.18); totH+=gap*(lines.length-1);
-        let top=c.tx.y*h-totH/2-fs*.30;
-        if(top<h*.10) top=0;                      /* 위쪽이면 화면 끝에 딱 붙임 */
         const padY=fs*.34;
+        let top=c.tx.y*h-totH/2-fs*.30, bandH=totH+padY*2;
+        /* 검은 띠는 화면 가로 전체 + 가까운 위/아래 가장자리까지 빈틈없이 채움 */
+        let bandTop=top-padY, bandBot=bandTop+bandH;
+        if(c.tx.y<=.5){ bandTop=0; bandBot=Math.max(bandBot, top+bandH-padY); }
+        else { bandBot=h; }
         g.save(); g.shadowBlur=0; g.shadowOffsetY=0;
         g.fillStyle=c.oband||'#000000';
-        g.fillRect(0, top, w, totH+padY*2);
+        g.fillRect(0, bandTop, w, bandBot-bandTop);
         g.restore();
-        let cy=top+padY;
+        let cy=(c.tx.y<=.5? bandBot-bandH+padY : bandTop+padY);
         lines.forEach((L,i)=>{ const fz=sizes[i]; setF(fz); cy+=fz*.94;
           g.fillStyle=(i===0? col : (c.oink2||'#FFFFFF'));
           g.fillText(L, x, cy);
           cy+=fz*.24+gap; });
         g.restore();
-        if(R.preview) HIT.push({id:'ov:'+c.id, x:0, y:top, w, h:totH+padY*2});
+        if(R.preview) HIT.push({id:'ov:'+c.id, x:0, y:bandTop, w, h:bandBot-bandTop});
         continue;
       }
       /* 배경/하이라이트 */
@@ -7527,6 +7542,21 @@ const HOOKS_DEFAULT={
     '천천히 가도 된다는 말을 곡으로 만들면','이 가사 한 줄 때문에 계속 듣는 중'],
   '도발':['이 소리 어디서 나오는지 아는 사람?','기타 한 번도 안 나오는 곡입니다',
     '이 곡 장르 맞히면 진짜 음악 좀 아는 사람'],
+  '배너 두줄':['비트 씹어 먹는 감다살 느좋 힙합','나만 듣기 아까운 귀호강 감성 힙합',
+    '감다살 감성힙합 찾아? 이거 무조건임!','제목 바로 궁금한 트렌디 감성 힙합',
+    '더위 싹 가시는 여름 힙합 플리','비트 장인이 말아주는 트렌디 느좋 힙합',
+    '도입부터 비트 뭐야? 얼마나 좋은지 감도 안 옴','듣자마자 소름 짝 도는 비트 맛집 이 힙합',
+    '하루종일 생각나는 트렌디 느좋 힙합','청춘 감성 200% 시원한 바이브 여름 힙합',
+    '새벽에만 들리는 저음 깔린 감성 힙합','창문 열고 들어야 하는 노을 드라이브 곡',
+    '첫 소절에 걸리는 느좋 감성 힙합','반복 재생 각인되는 중독성 미친 훅',
+    '한 번 들으면 못 빠져나오는 루프','헤드폰 쓰면 완전히 달라지는 곡',
+    '앉아서 못 듣는 그루브 미친 비트','목이 알아서 까딱거리는 느좋 힙합',
+    '여름밤 옥상에서 틀면 끝나는 플리','네온 켜지는 시간에 맞는 시티팝 무드',
+    '저장 안 하면 다시 못 찾는 숨은 명곡','아는 사람만 아는 감성 힙합 플리',
+    '이어폰 필수 저음 살아있는 트랙','스크롤 멈춘 사람 귀 좋은 거임',
+    '드럼 늘어지는 게 미친 느좋 비트','재즈바 조명 같은 야밤 감성 힙합',
+    '운전할 때 창문 내리게 되는 소리','걸음 느려지는 산책 전용 플리',
+    '두 번째 후렴부터 같이 부르게 됨','15만뷰 그 노래?! 느좋 감성 힙합'],
   '내 문구':[]
 };
 /* 사용자가 고치거나 추가한 문구는 브라우저에 저장됩니다 */
@@ -7547,15 +7577,15 @@ function applyHookStyle(){
   if(n){ renderTL(); drawNow(); }
   return n;
 }
-function hookPool(){ const p=HOOKS[hookCat]; return (p&&p.length)? p : (HOOKS['첫 소절']||['']); }
-let hookCat='첫 소절';
+function hookPool(){ const p=HOOKS[hookCat]; return (p&&p.length)? p : (HOOKS['배너 두줄']||HOOKS['첫 소절']||['']); }
+let hookCat='배너 두줄';
 const HK_STYLES=[['banner','썸네일 배너'],['pop','팝아웃'],['neon','네온'],['box','박스'],
                  ['grad','그라디언트'],['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
-const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', anim:'pop', font:0, size:1.25, hold:true};
+const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true};
 function hookExtra(){ return {ohook:true, ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
-  ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:'#FFFFFF', oband:'#000000',
+  ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:hookSty.sub, oband:'#000000',
   ostyle:hookSty.style, oanim:hookSty.anim}; }
 function renderHookStyle(){
   const sr=$('shStyleRow'), cr=$('shColorRow'), ar=$('shAnimRow'); if(!sr) return;
@@ -7567,7 +7597,11 @@ function renderHookStyle(){
       b.onclick=()=>{ set(v); renderHookStyle(); applyHookStyle(); }; box.appendChild(b); } };
   mk(sr,HK_STYLES,hookSty.style,v=>{hookSty.style=v;});
   mk(cr,HK_COLORS,hookSty.color,v=>{hookSty.color=v; $('shColorCustom').value=v;},true);
+  mk($('shColor2Row'),HK_COLORS,hookSty.sub,v=>{hookSty.sub=v; $('shColor2Custom').value=v;},true);
   mk(ar,HK_ANIMS,hookSty.anim,v=>{hookSty.anim=v;});
+  const isBanner=hookSty.style==='banner';
+  $('shColor2Wrap').style.display=isBanner?'':'none';
+  $('shColorLab').textContent=isBanner?'윗줄':'색';
   const fsel=$('shFont');
   if(fsel && !fsel.options.length)
     fsel.innerHTML=FONTS.map((f,i)=>`<option value="${i}">${f.n}</option>`).join('');
@@ -7587,7 +7621,7 @@ function renderHookStyle(){
     pv.style.display='block'; pv.style.textAlign='center'; pv.style.lineHeight='1.12';
     const l1=document.createElement('div'), l2=document.createElement('div');
     l1.textContent='볼륨 올려. 3초 뒤에'; l1.style.color=C;
-    l2.textContent='알게 됨'; l2.style.color='#FFFFFF'; l2.style.fontSize='1.18em';
+    l2.textContent='알게 됨'; l2.style.color=hookSty.sub; l2.style.fontSize='1.18em';
     pv.append(l1,l2);
     return;
   }
@@ -7671,6 +7705,11 @@ function addHookOverlay(text, atT, dur){
   return clip;
 }
 $('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); applyHookStyle(); });
+$('shColor2Custom').addEventListener('input',e=>{ hookSty.sub=e.target.value; renderHookStyle(); applyHookStyle(); });
+const shSizeStep=d=>{ hookSty.size=clamp(Math.round((hookSty.size*100+d)/5)*5,50,260)/100;
+  renderHookStyle(); applyHookStyle(); };
+$('shSizeUp').onclick=()=>shSizeStep(5);
+$('shSizeDn').onclick=()=>shSizeStep(-5);
 $('shFont').addEventListener('change',e=>{ hookSty.font=+e.target.value; renderHookStyle(); applyHookStyle(); });
 $('shSize').addEventListener('input',e=>{ hookSty.size=clamp(+e.target.value||125,50,260)/100; renderHookStyle(); applyHookStyle(); });
 $('shHold').addEventListener('change',e=>{
