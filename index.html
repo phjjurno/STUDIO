@@ -707,6 +707,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       <label class="row" style="margin-top:8px;gap:6px;align-items:center;cursor:pointer;font-size:12px;color:var(--dim)">
         <input type="checkbox" id="shHold" checked> 영상 끝까지 띄우기 <small class="usuf">(끄면 3초)</small></label>
+      <label class="row" id="shBand2Wrap" style="margin-top:4px;gap:6px;align-items:center;cursor:pointer;font-size:12px;color:var(--dim)">
+        <input type="checkbox" id="shBand2" checked> 반대쪽도 검정 띠 <small class="usuf">(위아래로 감싸 가운데 집중)</small></label>
       <div id="shPrev" class="shprev"><span></span></div>
       <div class="row" id="shHookCat" style="margin-top:10px"></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
@@ -6683,17 +6685,23 @@ function drawOverlays(t){
         const sizes=scales.map(k=>Math.round(fs*k));
         const gap=fs*.16;
         let totH=0; sizes.forEach(fz=>totH+=fz*1.18); totH+=gap*(lines.length-1);
-        const padY=fs*.34;
-        let top=c.tx.y*h-totH/2-fs*.30, bandH=totH+padY*2;
-        /* 검은 띠는 화면 가로 전체 + 가까운 위/아래 가장자리까지 빈틈없이 채움 */
-        let bandTop=top-padY, bandBot=bandTop+bandH;
-        if(c.tx.y<=.5){ bandTop=0; bandBot=Math.max(bandBot, top+bandH-padY); }
-        else { bandBot=h; }
+        const padY=fs*.46;
+        /* 검은 띠는 가로 전체 + 가까운 가장자리에 딱 붙고, 높이는 글자에 맞춰 최소로 */
+        const bandH=totH+padY*2;
+        let bandTop, bandBot;
+        if(c.tx.y<=.5){ bandTop=0; bandBot=bandH; }
+        else { bandBot=h; bandTop=h-bandH; }
         g.save(); g.shadowBlur=0; g.shadowOffsetY=0;
         g.fillStyle=c.oband||'#000000';
         g.fillRect(0, bandTop, w, bandBot-bandTop);
+        /* 반대쪽에도 같은 높이의 띠 — 위아래로 감싸서 가운데에 시선이 모이게 */
+        if(c.oband2!==false){
+          const bh2=Math.min(bandH, h*.22);
+          if(c.tx.y<=.5) g.fillRect(0, h-bh2, w, bh2);
+          else g.fillRect(0, 0, w, bh2);
+        }
         g.restore();
-        let cy=(c.tx.y<=.5? bandBot-bandH+padY : bandTop+padY);
+        let cy=bandTop+padY;
         lines.forEach((L,i)=>{ const fz=sizes[i]; setF(fz); cy+=fz*.94;
           g.fillStyle=(i===0? col : (c.oink2||'#FFFFFF'));
           g.fillText(L, x, cy);
@@ -7583,9 +7591,9 @@ const HK_STYLES=[['banner','썸네일 배너'],['pop','팝아웃'],['neon','네�
                  ['grad','그라디언트'],['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
-const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true};
+const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true, band2:true};
 function hookExtra(){ return {ohook:true, ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
-  ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:hookSty.sub, oband:'#000000',
+  ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:hookSty.sub, oband:'#000000', oband2:hookSty.band2,
   ostyle:hookSty.style, oanim:hookSty.anim}; }
 function renderHookStyle(){
   const sr=$('shStyleRow'), cr=$('shColorRow'), ar=$('shAnimRow'); if(!sr) return;
@@ -7601,6 +7609,8 @@ function renderHookStyle(){
   mk(ar,HK_ANIMS,hookSty.anim,v=>{hookSty.anim=v;});
   const isBanner=hookSty.style==='banner';
   $('shColor2Wrap').style.display=isBanner?'':'none';
+  $('shBand2Wrap').style.display=isBanner?'':'none';
+  if($('shBand2')) $('shBand2').checked=hookSty.band2;
   $('shColorLab').textContent=isBanner?'윗줄':'색';
   const fsel=$('shFont');
   if(fsel && !fsel.options.length)
@@ -7705,6 +7715,7 @@ function addHookOverlay(text, atT, dur){
   return clip;
 }
 $('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); applyHookStyle(); });
+$('shBand2').addEventListener('change',e=>{ hookSty.band2=e.target.checked; applyHookStyle(); });
 $('shColor2Custom').addEventListener('input',e=>{ hookSty.sub=e.target.value; renderHookStyle(); applyHookStyle(); });
 const shSizeStep=d=>{ hookSty.size=clamp(Math.round((hookSty.size*100+d)/5)*5,50,260)/100;
   renderHookStyle(); applyHookStyle(); };
@@ -7779,7 +7790,7 @@ $('shOptimize').onclick=()=>{
   state.trackLabel.show=true;
   state.subStyle.size=Math.max(state.subStyle.size,1.15);
   state.subStyle.y=.665;
-  Object.assign(state.progressBar,{show:true, x:.5, y:.795, w:.82, h:.008,
+  Object.assign(state.progressBar,{show:true, x:.5, y:.775, w:.82, h:.008,
     showTime:true, showName:false});
   syncRatioChips(); syncUIFromState(); renderAll();
   setStatus('📱 쇼츠 최적화 — 1080×1920 · 제목 확대·글로우 · 파형 확장 · 하단 UI 회피 배치');
