@@ -200,6 +200,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #shList .shrow.done{border-color:#3f7d55}
 #shList .shrow.cur{border-color:var(--amber)}
 #shHookList .hk-item{text-align:left;justify-content:flex-start;padding:7px 10px;font-size:12.5px}
+.shprev{margin-top:8px;height:62px;border:1px solid var(--line);border-radius:10px;
+  background:linear-gradient(135deg,#12151c,#1b2030);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.shprev span{font-size:19px;font-weight:900;letter-spacing:-.02em;white-space:nowrap;padding:3px 10px}
+#shStyleRow .chip,#shColorRow .chip,#shAnimRow .chip{padding:5px 9px;font-size:11.5px}
+#shColorRow .chip{width:26px;height:24px;padding:0;border-width:2px}
 #bgPickRow{gap:6px}
 #bgPickRow .bgth{width:52px;height:34px;border-radius:7px;border:1.5px solid var(--line);background-size:cover;background-position:center;cursor:pointer;padding:0}
 #bgPickRow .bgth.on{border-color:var(--amber);box-shadow:0 0 0 1.5px var(--amber)}
@@ -662,7 +667,21 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
       <div class="grp open"><div class="grp-h">후킹 문구<span class="chev">▾</span></div><div class="grp-b">
       <div class="hint2">문구를 누르면 영상 상단에 <b>3초짜리 후킹 자막</b>이 들어갑니다. <b>{제목}</b>은 곡 제목으로 자동 치환돼요.</div>
-      <div class="row" id="shHookCat" style="margin-top:8px"></div>
+      <div class="row" style="margin-top:8px;gap:6px;align-items:center">
+        <span class="hint2" style="margin:0">스타일</span>
+        <div class="row" id="shStyleRow" style="gap:4px"></div>
+      </div>
+      <div class="row" style="margin-top:6px;gap:6px;align-items:center">
+        <span class="hint2" style="margin:0">색</span>
+        <div class="row" id="shColorRow" style="gap:4px"></div>
+        <label class="colorpick" style="margin-left:2px"><input type="color" id="shColorCustom" value="#FFD400">직접</label>
+      </div>
+      <div class="row" style="margin-top:6px;gap:6px;align-items:center">
+        <span class="hint2" style="margin:0">등장</span>
+        <div class="row" id="shAnimRow" style="gap:4px"></div>
+      </div>
+      <div id="shPrev" class="shprev"><span></span></div>
+      <div class="row" id="shHookCat" style="margin-top:10px"></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
         <input class="snum" id="shHookCustom" placeholder="직접 입력…" style="flex:1;min-width:0;text-align:left;padding:7px 10px">
@@ -679,10 +698,12 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       <div class="row" style="margin-top:8px">
         <button class="chip" id="shBuild">🎯 곡마다 하이라이트 자동 추출</button>
+        <button class="chip" id="shAddHere">⤓ 현재 위치로 추가</button>
         <button class="chip" id="shClear">비우기</button>
       </div>
       <div id="shList"></div>
-      <div class="empty-note" id="shEmpty">아직 목록이 없습니다 — 「하이라이트 자동 추출」을 누르면 곡마다 가장 신나는 구간을 찾아 담아요</div>
+      <div class="empty-note" id="shEmpty">아직 목록이 없습니다 — 「하이라이트 자동 추출」로 곡마다 후렴을 찾아 담거나,<br>타임라인에서 원하는 지점을 클릭하고 「현재 위치로 추가」를 누르세요</div>
+      <div class="hint2">각 줄의 <b>⤓</b> 는 재생 헤드 위치를 그 항목의 시작점으로 바꿉니다. 시각을 직접 입력해도 됩니다.</div>
       <div class="row" style="margin-top:10px">
         <button class="chip" id="shExportAll" style="border-color:var(--amber);color:var(--amber)">⚡ 목록 전부 내보내기</button>
         <button class="chip" id="shStop" style="display:none">중지</button>
@@ -6536,6 +6557,11 @@ function drawPlaylistText(t){
 }
 
 /* 텍스트 오버레이 */
+const shade=(hex,amt)=>{ const m=/^#?([\da-fA-F]{6})$/.exec(String(hex||'').replace('#','')); 
+  if(!m) return hex||'#ffffff';
+  const n=parseInt(m[1],16), f=v=>Math.round(clamp(amt<0? v*(1+amt) : v+(255-v)*amt,0,255));
+  return '#'+[f(n>>16&255),f(n>>8&255),f(n&255)].map(v=>v.toString(16).padStart(2,'0')).join(''); };
+const easeOutBack=k=>{ const c1=1.70158, c3=c1+1; return 1+c3*Math.pow(k-1,3)+c1*Math.pow(k-1,2); };
 function drawOverlays(t){
   const {g,w,h}=R;
   for(const tr of state.tracks) if(tr.kind==='over')
@@ -6548,16 +6574,61 @@ function drawOverlays(t){
       const F=FONTS[c.ofont||0];
       const portrait=h>w;
       const fs=Math.round(w*(portrait?.05:.036)*(c.osize||1)*F.mul);
+      const sty=c.ostyle||'plain', col=c.ocolor||'#FFFFFF', col2=c.ocolor2||'#000000';
+      const lines=(c.otext||'').split('\n');
+      const lh=fs*1.3, x=c.tx.x*w, y0=c.tx.y*h-(lines.length-1)*lh/2;
       g.save();
       g.globalAlpha=clamp(alpha,0,1);
-      g.textAlign='center';
-      g.font=`${F.weight} ${fs}px ${F.fam},'Noto Sans KR',sans-serif`;
-      if(state.shadowOn){ g.shadowColor='rgba(0,0,0,.55)'; g.shadowBlur=w*.005; g.shadowOffsetY=2; }
-      g.fillStyle=c.ocolor||'#FFFFFF';
-      const lines=(c.otext||'').split('\n');
-      const lh=fs*1.25, x=c.tx.x*w, y0=c.tx.y*h-(lines.length-1)*lh/2;
-      let mw=0;
-      lines.forEach((L,i)=>{ g.fillText(L,x,y0+i*lh); mw=Math.max(mw,g.measureText(L).width); });
+      g.textAlign='center'; g.textBaseline='alphabetic';
+      const weight=(sty==='plain')? F.weight : Math.max(F.weight,800);
+      g.font=`${weight} ${fs}px ${F.fam},'Noto Sans KR',sans-serif`;
+      let mw=0; lines.forEach(L=>mw=Math.max(mw,g.measureText(L).width));
+      /* 등장 모션 */
+      const anim=c.oanim||'pop';
+      if(anim!=='none'){
+        let sc=1, dy=0;
+        if(lt<.28){ const k=easeOutBack(lt/.28);
+          if(anim==='pop') sc=.72+.28*k;
+          else if(anim==='rise'){ sc=1; dy=(1-k)*fs*.7; }
+          else sc=.85+.15*k; }
+        if(anim==='pulse') sc*=1+Math.sin(lt*6.2)*.022;
+        g.translate(x, y0+dy); g.scale(sc,sc); g.translate(-x,-y0);
+      }
+      /* 배경/하이라이트 */
+      if(sty==='box'||sty==='hilite'){
+        const padX=fs*.42, padY=fs*.3;
+        g.save(); g.fillStyle=col;
+        if(sty==='box'){
+          const bx=x-mw/2-padX, by=y0-fs*.92-padY*.5, bw=mw+padX*2, bh=lh*lines.length+padY;
+          roundRect(g,bx,by,bw,bh,fs*.28); g.fill();
+        }else{
+          lines.forEach((L,i)=>{ const lw=g.measureText(L).width;
+            g.fillRect(x-lw/2-fs*.14, y0+i*lh-fs*.80, lw+fs*.28, fs*.98); });
+        }
+        g.restore();
+      }
+      const paint=(fn)=>lines.forEach((L,i)=>fn(L,x,y0+i*lh));
+      if(state.shadowOn&&sty!=='neon'){ g.shadowColor='rgba(0,0,0,.5)'; g.shadowBlur=w*.004; g.shadowOffsetY=2; }
+      if(sty==='shadow3d'){ /* 어두운 배경에서도 읽히도록 색을 어둡게 깐 입체 그림자 */
+        g.save(); g.shadowBlur=0; g.shadowOffsetY=0; g.fillStyle=shade(col,-.62);
+        for(let k=8;k>=1;k--) paint((L,px,py)=>g.fillText(L,px+fs*.012*k,py+fs*.015*k));
+        g.restore(); }
+      if(sty==='pop'||sty==='grad'||sty==='shadow3d'){
+        g.save(); g.lineJoin='round'; g.miterLimit=2;
+        g.lineWidth=fs*(sty==='grad'?.15:.19); g.strokeStyle=(sty==='shadow3d')?'#000':col2;
+        paint((L,px,py)=>g.strokeText(L,px,py)); g.restore();
+      }
+      if(sty==='neon'){
+        g.save(); g.shadowColor=col; g.fillStyle=col;
+        for(const b of [fs*.9, fs*.45]){ g.shadowBlur=b; paint((L,px,py)=>g.fillText(L,px,py)); }
+        g.restore();
+      }
+      if(sty==='grad'){
+        const gr=g.createLinearGradient(0,y0-fs,0,y0+lh*(lines.length-1)+fs*.3);
+        gr.addColorStop(0,'#FFFFFF'); gr.addColorStop(.42,col); gr.addColorStop(1,shade(col,-.45)); g.fillStyle=gr;
+      }else if(sty==='box'||sty==='hilite'){ g.fillStyle=c.oink||'#0B0B0D'; }
+      else g.fillStyle=col;
+      paint((L,px,py)=>g.fillText(L,px,py));
       g.restore();
       if(R.preview) HIT.push({id:'ov:'+c.id, x:x-mw/2-w*.01, y:y0-fs*1.05, w:mw+w*.02, h:lh*lines.length+fs*.3});
     }
@@ -7356,6 +7427,37 @@ const HOOKS={
         '여름밤 드라이브 곡','연말에 듣는 노래']
 };
 let hookCat='감성';
+const HK_STYLES=[['pop','팝아웃'],['neon','네온'],['box','박스'],['grad','그라디언트'],
+                 ['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
+const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
+const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
+const hookSty={style:'pop', color:'#FFD400', color2:'#0B0B0D', anim:'pop'};
+function hookExtra(){ return {ofont:0, osize:1.25, ocolor:hookSty.color,
+  ocolor2:hookSty.color2, oink:'#0B0B0D',
+  ostyle:hookSty.style, oanim:hookSty.anim}; }
+function renderHookStyle(){
+  const sr=$('shStyleRow'), cr=$('shColorRow'), ar=$('shAnimRow'); if(!sr) return;
+  const mk=(box,list,cur,set,paint)=>{ box.innerHTML='';
+    for(const it of list){ const [v,lab]=Array.isArray(it)?it:[it,''];
+      const b=document.createElement('button'); b.className='chip'+(v===cur?' on':'');
+      if(paint){ b.style.background=v; b.style.borderColor=(v===cur?'var(--amber)':'transparent'); b.title=v; }
+      else b.textContent=lab;
+      b.onclick=()=>{ set(v); renderHookStyle(); }; box.appendChild(b); } };
+  mk(sr,HK_STYLES,hookSty.style,v=>{hookSty.style=v;});
+  mk(cr,HK_COLORS,hookSty.color,v=>{hookSty.color=v; $('shColorCustom').value=v;},true);
+  mk(ar,HK_ANIMS,hookSty.anim,v=>{hookSty.anim=v;});
+  const pv=$('shPrev').firstElementChild, C=hookSty.color, S=hookSty.style;
+  pv.style.cssText='';
+  pv.textContent='이 노래 모르면 진짜 손해';
+  if(S==='box'){ pv.style.background=C; pv.style.color='#0B0B0D'; pv.style.borderRadius='7px'; }
+  else if(S==='hilite'){ pv.style.background=`linear-gradient(transparent 52%, ${C} 52%, ${C} 88%, transparent 88%)`; pv.style.color='#0B0B0D'; }
+  else if(S==='neon'){ pv.style.color=C; pv.style.textShadow=`0 0 10px ${C},0 0 22px ${C}`; }
+  else if(S==='grad'){ pv.style.background=`linear-gradient(180deg,${C},#fff)`; pv.style.webkitBackgroundClip='text';
+    pv.style.webkitTextFillColor='transparent'; pv.style.filter='drop-shadow(0 0 1px #000)'; }
+  else if(S==='shadow3d'){ pv.style.color=C; pv.style.textShadow='2px 3px 0 #000'; }
+  else if(S==='pop'){ pv.style.color=C; pv.style.textShadow='0 0 3px #000,2px 2px 0 #000,-2px -2px 0 #000,2px -2px 0 #000,-2px 2px 0 #000'; }
+  else pv.style.color=C;
+}
 function renderHooks(){
   const cr=$('shHookCat'), lr=$('shHookList'); if(!cr) return;
   cr.innerHTML='';
@@ -7383,79 +7485,147 @@ function addHookOverlay(text, atT, dur){
   if(!title && cs.length){ const a=A(cs[0].assetId); title=cs[0].title||(a?a.name:''); }
   const txt=String(text).replace(/\{제목\}/g, title||'');
   pushUndo();
-  const clip=newClip(null, start, dur||3,
-    {otext:txt, ofont:0, osize:1.25, ocolor:'#FFFFFF'});
+  const clip=newClip(null, start, dur||3, Object.assign({otext:txt}, hookExtra()));
   clip.tx.y=0.16;                       /* 쇼츠 상단 안전영역 */
   T2.clips.push(clip);
   renderAll();
   setStatus(`후킹 문구 추가: “${txt}”`);
   return clip;
 }
+$('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); });
 $('shHookAdd').onclick=()=>{ const v=$('shHookCustom').value.trim(); if(v) addHookOverlay(v); };
 $('shHookCustom').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const v=e.target.value.trim(); if(v) addHookOverlay(v); }});
 
 /* ── 쇼츠 최적화 / 복원 ── */
-let shortsBackup=null;
+const SHORTS_KEYS=['ratio','el','titleScale','glow','titleFx','shadowOn','vignette','progressBar','subStyle','trackLabel'];
+let shortsBackup=null, shortsOn=false;
+function snapLayout(){
+  const o={};
+  for(const k of SHORTS_KEYS) o[k]=JSON.parse(JSON.stringify(state[k]));
+  o.exp={w:exp.w,h:exp.h,fps:exp.fps,scale:exp.scale};
+  return o;
+}
+function applyLayout(o){
+  for(const k of SHORTS_KEYS) state[k]=JSON.parse(JSON.stringify(o[k]));
+  Object.assign(exp,o.exp);
+  canvas.width=state.ratio.w; canvas.height=state.ratio.h;
+  syncRatioChips(); syncUIFromState(); renderAll();
+}
+function syncRatioChips(){
+  [...$('ratioRow').children].forEach(c=>c.classList.toggle('on',
+    +c.dataset.w===state.ratio.w && +c.dataset.h===state.ratio.h));
+}
 $('shOptimize').onclick=()=>{
-  shortsBackup={ratio:{...state.ratio}, el:JSON.parse(JSON.stringify(state.el)),
-    titleScale:state.titleScale, subY:state.subStyle.y, pb:{...state.progressBar}, fps:exp.fps};
+  if(!shortsOn) shortsBackup=snapLayout();     /* 이미 세로면 원본을 덮어쓰지 않음 */
+  shortsOn=true;
   state.ratio={w:1080,h:1920};
   canvas.width=1080; canvas.height=1920;
-  exp.w=1080; exp.h=1920; exp.scale=1; exp.fps=30;
-  /* 세로 안전영역: 상단 15%는 제목/후킹, 하단 18%는 쇼츠 UI가 가림 */
-  state.el.title={x:.5,y:.30,custom:true};
-  state.el.label={x:.5,y:.245,custom:true};
-  state.el.wave.x=.5; state.el.wave.y=.53;
-  state.el.lyrics={x:.5,y:.70,custom:true};
-  if(state.el.lp){ state.el.lp.x=.5; state.el.lp.y=.46; state.el.lp.scale=Math.min(state.el.lp.scale||1,.95); }
-  state.titleScale=Math.max(state.titleScale,1.15);
-  state.subStyle.y=.70;
-  Object.assign(state.progressBar,{x:.5,y:.795,w:.80,h:.010});
-  [...$('ratioRow').children].forEach(c=>c.classList.toggle('on', +c.dataset.w===1080&&+c.dataset.h===1920));
-  syncUIFromState(); renderAll();
-  setStatus('📱 쇼츠용으로 최적화했습니다 — 1080×1920 · 안전영역 배치 완료');
+  Object.assign(exp,{w:1080,h:1920,scale:1,fps:30});
+  /* ── 세로 안전영역 ──
+     상단 0~14%: 후킹 문구 자리 · 하단 82~100%: 쇼츠 UI(제목·프로필·버튼)가 가림 */
+  const lp=state.template==='lp';
+  state.el.title={x:.5, y:lp?.755:.30, custom:true};
+  state.el.label={x:.5, y:lp?.715:.245, custom:true};
+  state.el.lyrics={x:.5, y:.665, custom:true};
+  state.el.wave.x=.5;
+  state.el.wave.y=lp?.62:.50;
+  state.el.wave.sw=lp?.86:1.06;                 /* 세로에선 좌우로 꽉 차게 */
+  state.el.wave.sh=lp?1.0:1.3;                  /* 위아래로 시원하게 */
+  if(lp){ state.el.lp=state.el.lp||{x:.5,y:.5,scale:1};
+          state.el.lp.x=.5; state.el.lp.y=.36; state.el.lp.scale=Math.min(state.el.lp.scale||1,.92); }
+  /* 눈에 확 들어오게 */
+  state.titleScale=Math.max(state.titleScale,1.3);
+  state.glow=Math.max(state.glow,1.5);
+  if(state.titleFx==='none') state.titleFx='glow';
+  state.shadowOn=true; state.vignette=true;
+  state.trackLabel.show=true;
+  state.subStyle.size=Math.max(state.subStyle.size,1.15);
+  state.subStyle.y=.665;
+  Object.assign(state.progressBar,{show:true, x:.5, y:.795, w:.82, h:.008,
+    showTime:true, showName:false});
+  syncRatioChips(); syncUIFromState(); renderAll();
+  setStatus('📱 쇼츠 최적화 — 1080×1920 · 제목 확대·글로우 · 파형 확장 · 하단 UI 회피 배치');
 };
 $('shRestore').onclick=()=>{
-  if(!shortsBackup){ setStatus('되돌릴 이전 설정이 없습니다.'); return; }
-  state.ratio={...shortsBackup.ratio};
-  canvas.width=state.ratio.w; canvas.height=state.ratio.h;
-  state.el=JSON.parse(JSON.stringify(shortsBackup.el));
-  state.titleScale=shortsBackup.titleScale;
-  state.subStyle.y=shortsBackup.subY;
-  Object.assign(state.progressBar, shortsBackup.pb);
-  exp.w=state.ratio.w; exp.h=state.ratio.h; exp.fps=shortsBackup.fps;
-  [...$('ratioRow').children].forEach(c=>c.classList.toggle('on', +c.dataset.w===state.ratio.w&&+c.dataset.h===state.ratio.h));
-  syncUIFromState(); renderAll();
-  setStatus('가로 설정으로 되돌렸습니다.');
+  if(shortsBackup){ applyLayout(shortsBackup); shortsOn=false;
+    setStatus('최적화 이전 가로 배치로 되돌렸습니다.'); return; }
+  /* 백업이 없어도(새로고침 등) 가로 기본값으로 복구 */
+  applyLayout({ratio:{w:1920,h:1080},
+    el:{wave:{x:.5,y:.74,sw:1,sh:1,panel:state.el.wave.panel??1},
+        title:{x:.5,y:0,custom:false}, label:{x:.5,y:0,custom:false},
+        lyrics:{x:.5,y:.84,custom:false}, lp:{x:.5,y:.5,scale:1}},
+    titleScale:1, glow:state.glow, titleFx:state.titleFx,
+    shadowOn:state.shadowOn, vignette:state.vignette,
+    progressBar:Object.assign({...state.progressBar},{x:.5,y:.88,w:.72,h:.025,showName:true}),
+    subStyle:Object.assign({...state.subStyle},{y:.86}),
+    trackLabel:{...state.trackLabel},
+    exp:{w:1920,h:1080,fps:exp.fps,scale:1}});
+  shortsOn=false;
+  setStatus('가로 16:9 기본 배치로 되돌렸습니다.');
 };
 
-/* ── 하이라이트 자동 추출: 곡에서 에너지가 가장 높은 구간 ── */
-function findHighlight(c, want){
+/* ── 하이라이트 자동 추출 ──
+   음압(RMS)만 보면 그냥 시끄러운 데를 잡습니다. 후렴은 대개
+   ① 평균 음압이 높고 ② 그 음압이 구간 내내 꾸준하며 ③ 타격(온셋)이 촘촘합니다.
+   세 가지를 함께 점수화하고, 인트로/아웃트로에 감점을 준 뒤
+   시작점은 바로 앞 온셋으로 당겨 붙여 박자에 맞춥니다. */
+const HL_HOP=0.25;
+function songFeatures(a, inS, avail){
+  const buf=a.audioBuffer, sr=buf.sampleRate;
+  const chs=[buf.getChannelData(0)];
+  if(buf.numberOfChannels>1) chs.push(buf.getChannelData(1));
+  const n=Math.max(1,Math.floor(avail/HL_HOP)), span=Math.floor(sr*HL_HOP);
+  const rms=new Float32Array(n), flux=new Float32Array(n);
+  let prev=0;
+  for(let i=0;i<n;i++){
+    const s0=Math.floor((inS+i*HL_HOP)*sr);
+    let sum=0, cnt=0;
+    for(let k=s0;k<s0+span;k+=16){
+      let v=0; for(const ch of chs) v+=ch[k]||0;
+      v/=chs.length; sum+=v*v; cnt++;
+    }
+    const r=cnt?Math.sqrt(sum/cnt):0;
+    rms[i]=r; flux[i]=Math.max(0,r-prev); prev=r;
+  }
+  return {rms,flux,n};
+}
+function findHighlight(c, want, fromT){
   const a=A(c.assetId);
   if(!a||!a.audioBuffer) return c.start;
-  const buf=a.audioBuffer, sr=buf.sampleRate;
-  const ch=buf.getChannelData(0);
-  const inS=c.in, avail=c.dur*c.speed;                 /* 클립이 쓰는 소스 구간 */
-  const win=Math.min(want*c.speed, avail);
+  const cEnd=clipEnd(c);
+  const inS=c.in, avail=c.dur*c.speed, win=Math.min(want*c.speed, avail);
   if(avail<=win+0.2) return c.start;
-  const HOP=0.5;                                       /* 0.5초 단위로 RMS */
-  const n=Math.floor(avail/HOP);
-  const e=new Float32Array(Math.max(1,n));
-  for(let i=0;i<n;i++){
-    const s0=Math.floor((inS+i*HOP)*sr);
-    let sum=0, cnt=0;
-    for(let k=s0;k<s0+sr*HOP;k+=64){ const v=ch[k]||0; sum+=v*v; cnt++; }
-    e[i]=cnt? Math.sqrt(sum/cnt) : 0;
+  if(!a.__hl||a.__hl.inS!==inS||a.__hl.avail!==avail) a.__hl=Object.assign(songFeatures(a,inS,avail),{inS,avail});
+  const {rms,flux,n}=a.__hl;
+  const W=Math.max(1,Math.round(win/HL_HOP));
+  if(n<=W) return c.start;
+  const peak=Math.max(...rms)||1, fpeak=Math.max(...flux)||1;
+  /* 누적합으로 창 평균·플럭스 밀도를 O(n)에 */
+  const cr=new Float64Array(n+1), cf=new Float64Array(n+1);
+  for(let i=0;i<n;i++){ cr[i+1]=cr[i]+rms[i]; cf[i+1]=cf[i]+flux[i]; }
+  let best=0, bestScore=-1e9;
+  for(let i=0;i+W<=n;i++){
+    const mean=(cr[i+W]-cr[i])/W/peak;
+    const fl=(cf[i+W]-cf[i])/W/fpeak;
+    /* 꾸준함: 창 안에서 조용한 지점이 적을수록 높음 */
+    let low=0; for(let k=i;k<i+W;k++) if(rms[k]<peak*.35) low++;
+    const steady=1-low/W;
+    const pos=i/(n-W);                      /* 0=곡 앞, 1=곡 끝 */
+    const edge=(pos<.12? -(0.12-pos)*2.2 : 0) + (pos>.88? -(pos-.88)*1.6 : 0);
+    const sc=mean*1.0 + steady*0.75 + fl*0.5 + edge;
+    if(sc>bestScore){ bestScore=sc; best=i; }
   }
-  const wSteps=Math.max(1,Math.round(win/HOP));
-  let best=0, bestV=-1, run=0;
-  for(let i=0;i<wSteps&&i<n;i++) run+=e[i];
-  bestV=run; best=0;
-  for(let i=wSteps;i<n;i++){ run+=e[i]-e[i-wSteps];
-    if(run>bestV){ bestV=run; best=i-wSteps+1; } }
-  const offSrc=best*HOP;                               /* 소스 기준 오프셋 */
-  return c.start + offSrc/c.speed;                     /* 타임라인 시각 */
+  /* 시작점을 바로 앞 온셋(가장 큰 flux)으로 당겨 붙임 — 최대 2초 */
+  const back=Math.round(2/HL_HOP);
+  let sn=best, snV=flux[best]||0;
+  for(let k=Math.max(0,best-back);k<=Math.min(n-W,best+back);k++)
+    if(flux[k]>snV*1.15){ snV=flux[k]; sn=k; }
+  const offSrc=sn*HL_HOP;
+  let t=c.start + offSrc/c.speed;
+  if(fromT!=null) t=Math.max(t, fromT);
+  return clamp(t, c.start, Math.max(c.start, cEnd-Math.min(want,avail/c.speed)));
 }
+function clipAt(t){ return plClips().find(c=>t>=c.start-.001 && t<clipEnd(c)) || null; }
 /* ── 쇼츠 큐 ── */
 let shortsQueue=[], shortsBusy=false, shortsAbort=false;
 function renderShortsList(){
@@ -7468,6 +7638,7 @@ function renderShortsList(){
       <span class="ti"></span>
       <input class="hk" placeholder="후킹 문구">
       <input class="tm" title="시작 시각">
+      <button class="here" title="재생 헤드 위치를 시작점으로">⤓</button>
       <button class="rm" title="빼기">✕</button>`;
     row.querySelector('.ti').textContent=it.title;
     const hk=row.querySelector('.hk'); hk.value=it.hook||'';
@@ -7475,6 +7646,12 @@ function renderShortsList(){
     const tm=row.querySelector('.tm'); tm.value=fmtT(it.start);
     tm.addEventListener('change',()=>{ const v=parseT(tm.value);
       if(!isNaN(v)) it.start=clamp(v,0,Math.max(0,tlDuration()-1)); tm.value=fmtT(it.start); });
+    row.querySelector('.here').onclick=()=>{
+      const c=plClips().find(x=>x.id===it.clipId);
+      it.start=+clamp(state.time,0,Math.max(0,tlDuration()-1)).toFixed(2);
+      it.dur=(c? Math.min(clipEnd(c)-it.start, tlDuration()-it.start) : tlDuration()-it.start);
+      renderShortsList();
+      setStatus(`${i+1}번 시작점을 ${fmtT(it.start)} 로 옮겼습니다.`); };
     row.querySelector('.rm').onclick=()=>{ shortsQueue.splice(i,1); renderShortsList(); };
     row.onclick=e=>{ if(e.target.closest('input,button')) return; seekTo(it.start); };
     box.appendChild(row);
@@ -7495,14 +7672,26 @@ $('shBuild').onclick=()=>{
   renderShortsList();
   setStatus(`하이라이트 ${shortsQueue.length}개를 담았습니다 — 문구·시작 시각을 다듬고 「전부 내보내기」`);
 };
+$('shAddHere').onclick=()=>{
+  const t=state.time, c=clipAt(t);
+  const want=clamp(+$('shLen').value||30,10,60);
+  const a=c?A(c.assetId):null, title=c?(c.title||(a?a.name:'')):'';
+  const lim=c? clipEnd(c) : tlDuration();
+  const dur=Math.min(want, lim-t);
+  if(dur<=3){ setStatus('현재 위치에서 남은 길이가 너무 짧습니다.'); return; }
+  const pool=HOOKS[hookCat];
+  shortsQueue.push({clipId:c?c.id:null, title:title||`구간 ${fmtT(t)}`, start:+t.toFixed(2), dur,
+    hook:pool[shortsQueue.length%pool.length].replace(/\{제목\}/g,title)});
+  renderShortsList();
+  setStatus(`${fmtT(t)} 지점을 목록에 추가했습니다.`); };
 $('shClear').onclick=()=>{ shortsQueue=[]; renderShortsList(); };
 $('shStop').onclick=()=>{ shortsAbort=true; state.cancelRender=true; };
 
 $('shExportAll').onclick=async()=>{
   if(shortsBusy) return;
   if(!shortsQueue.length){ setStatus('내보낼 목록이 없습니다.'); return; }
-  if(state.ratio.w>state.ratio.h &&
-     !confirm('가로 비율입니다. 쇼츠용으로 최적화하지 않고 진행할까요?')) return;
+  if(state.ratio.w>=state.ratio.h &&
+     !confirm('세로(9:16)가 아닙니다. 「쇼츠용으로 최적화」 없이 이대로 진행할까요?')) return;
   shortsBusy=true; shortsAbort=false;
   $('shStop').style.display=''; $('shExportAll').disabled=true;
   const T2=state.tracks.find(t=>t.kind==='over');
@@ -7520,8 +7709,8 @@ $('shExportAll').onclick=async()=>{
     /* 후킹 오버레이 삽입 */
     let hookClip=null;
     if(it.hook){
-      hookClip=newClip(null, it.start+0.15, Math.min(3, it.dur-0.3),
-        {otext:it.hook, ofont:0, osize:1.25, ocolor:'#FFFFFF'});
+      hookClip=newClip(null, it.start+0.15, Math.min(3.2, it.dur-0.3),
+        Object.assign({otext:it.hook}, hookExtra()));
       hookClip.tx.y=0.16;
       T2.clips.push(hookClip);
     }
@@ -7547,7 +7736,7 @@ $('shExportAll').onclick=async()=>{
   $('shProg').innerHTML=`✅ ${okCount}/${shortsQueue.length}개 완료 — 다운로드 목록을 확인하세요.`;
   setStatus(`쇼츠 ${okCount}개를 내보냈습니다.`);
 };
-renderHooks(); renderShortsList();
+renderHooks(); renderHookStyle(); renderShortsList();
 
 /* ═══════ 키보드 ═══════ */
 document.addEventListener('keydown',e=>{
