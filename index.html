@@ -200,6 +200,13 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #shList .shrow.done{border-color:#3f7d55}
 #shList .shrow.cur{border-color:var(--amber)}
 #shHookList .hk-item{text-align:left;justify-content:flex-start;padding:7px 10px;font-size:12.5px}
+.hkrow{display:flex;gap:4px;align-items:stretch}
+.hkrow .hk-item{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hkrow .mini{background:none;border:1px solid var(--line);border-radius:8px;color:var(--dim);
+  cursor:pointer;font-size:12px;padding:0 8px;flex:0 0 auto}
+.hkrow .mini:hover{color:var(--ink);border-color:var(--amber)}
+.hkedit{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--amber);color:var(--ink);
+  border-radius:9px;padding:7px 10px;font-family:inherit;font-size:12.5px}
 .shprev{margin-top:8px;height:62px;border:1px solid var(--line);border-radius:10px;
   background:linear-gradient(135deg,#12151c,#1b2030);display:flex;align-items:center;justify-content:center;overflow:hidden}
 .shprev span{font-size:19px;font-weight:900;letter-spacing:-.02em;white-space:nowrap;padding:3px 10px}
@@ -667,6 +674,12 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
       <div class="grp open"><div class="grp-h">후킹 문구<span class="chev">▾</span></div><div class="grp-b">
       <div class="hint2">문구를 누르면 영상 상단에 <b>3초짜리 후킹 자막</b>이 들어갑니다. <b>{제목}</b>은 곡 제목으로 자동 치환돼요.</div>
+      <div class="row" style="margin-top:8px;gap:8px;align-items:center">
+        <label style="font-size:12px;color:var(--dim);flex:1;min-width:0">폰트
+          <select id="shFont" style="width:100%"></select></label>
+        <label style="font-size:12px;color:var(--dim)">크기
+          <input type="number" class="snum" id="shSize" min="50" max="260" step="5" value="125" style="width:58px"><small class="usuf">%</small></label>
+      </div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
         <span class="hint2" style="margin:0">스타일</span>
         <div class="row" id="shStyleRow" style="gap:4px"></div>
@@ -684,9 +697,15 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="row" id="shHookCat" style="margin-top:10px"></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
-        <input class="snum" id="shHookCustom" placeholder="직접 입력…" style="flex:1;min-width:0;text-align:left;padding:7px 10px">
-        <button class="chip" id="shHookAdd">＋ 넣기</button>
+        <input class="snum" id="shHookCustom" placeholder="새 문구를 쓰고 Enter…" style="flex:1;min-width:0;text-align:left;padding:7px 10px">
+        <button class="chip" id="shHookSave" title="이 카테고리에 저장">💾 저장</button>
+        <button class="chip" id="shHookAdd" title="저장하지 않고 영상에만 넣기">＋ 넣기</button>
       </div>
+      <div class="row" style="margin-top:6px">
+        <button class="chip" id="shHookReset" title="이 카테고리를 기본 문구로 되돌립니다">↩ 이 카테고리 기본값</button>
+      </div>
+      <div class="hint2">문구를 누르면 재생 헤드 위치에 들어갑니다. <b>✎</b> 수정 · <b>✕</b> 삭제 —
+        고친 내용은 이 브라우저에 저장돼 다음에도 그대로 나옵니다.</div>
       </div></div>
 
       <div class="grp open"><div class="grp-h">쇼츠 공장 — 자동 추출 · 일괄 내보내기<span class="chev">▾</span></div><div class="grp-b">
@@ -7413,26 +7432,46 @@ function renderTLLight(c){
 }
 
 /* ═══════════ 쇼츠 공장 ═══════════ */
-const HOOKS={
-  '감성':['이 노래 모르면 진짜 손해','새벽 3시에 듣기 좋은 노래','비 오는 날 이 노래 한 번',
-        '드라이브할 때 무조건 이거','감성 터지는 노래 발견','밤에 들으면 위험한 노래',
-        '이 노래로 하루 마무리','혼자 있을 때 듣는 플리'],
-  '궁금증':['이 노래 제목 아는 사람?','인트로만 듣고 소름 돋음','3초만 들어보세요',
-          '이 노래 어디서 들어봤죠?','댓글에 제목 있습니다','끝까지 들으면 반전'],
-  '공감':['다들 이 노래 아시죠?','이거 듣고 울컥했다','플리에 무조건 있는 노래',
-        '나만 아는 노래였으면','이 노래 안 좋아할 수 없음','추억 소환되는 노래'],
-  '추천':['저장 안 하면 후회','플레이리스트 추가 필수','{제목} — 이건 들어야 해',
-        '오늘의 추천곡','아는 사람만 아는 명곡','재생목록 1번 곡'],
-  '시즌':['가을에 어울리는 노래','겨울밤 감성 플리','봄에 듣기 좋은 곡',
-        '여름밤 드라이브 곡','연말에 듣는 노래']
+const HOOKS_DEFAULT={
+  '첫 소절':['볼륨 올려. 3초 뒤에 알게 됨','이어폰 없으면 반은 못 들은 거임',
+    '이 베이스 나오는 순간 목 움직임','여기서 스크롤 멈춘 사람 귀 좋음','소리 켜라. 진심으로',
+    '5초만. 딱 5초만 참고 들어봐','이거 첫 소절이 전부다','저음 안 나오는 폰이면 나중에 다시 들어',
+    '이 인트로에 안 걸리는 사람 없음','지금 스크롤하면 후회함'],
+  '그루브':['몸이 먼저 알아듣는 소리','이 드럼 늘어지는 거 미쳤다','목이 알아서 까딱거림',
+    '이 구간부터 몸이 꿀렁임','앉아서 못 듣는 노래','어깨부터 반응함','베이스가 바닥을 긁고 지나감',
+    '이 스윙 못 참는 사람 여기 모여','걸어다니면서 들으면 걸음 느려짐','운전할 때 창문 내리게 되는 소리'],
+  '장면':['노을 지는 해변 도로가 그냥 보임','새벽 4시 도시 소리','여름밤 옥상에서 들으면 끝',
+    '야자수랑 네온 자동 재생됨','이 곡 틀면 방이 클럽 됨','창문 열고 들어야 하는 노래',
+    '담배 연기 자욱한 재즈바 같은 소리','낮은 조명에서만 들려야 할 곡','이거 듣고 LA 안 가고 싶으면 인정',
+    '해 지는 시간에 맞춰서 들어봐'],
+  '중독성':['한 문장이 계속 반복되는데 못 빠져나옴','두 번째 후렴부터 너도 부르고 있음',
+    '오늘 하루 이 멜로디 못 지움','가사 몰라도 따라 부르게 됨','이 부분에서 다 같이 소리 지름',
+    '끝까지 듣지 마. 계속 생각남','지금 안 들으면 나중에 알고리즘이 다시 데려옴',
+    '이 훅 한 번 들으면 각인됨','무한 반복 중인 구간','저장 안 하면 다시 못 찾는다'],
+  '감정':['조급한 사람이 들어야 할 노래','남들 속도에 지친 날 듣는 곡','요즘 뒤처진 것 같으면 이거 들어',
+    '새벽에 이 곡 만난 사람만 아는 기분','아무한테도 증명 안 해도 되는 밤',
+    '천천히 가도 된다는 말을 곡으로 만들면','이 가사 한 줄 때문에 계속 듣는 중'],
+  '도발':['이 소리 어디서 나오는지 아는 사람?','기타 한 번도 안 나오는 곡입니다',
+    '이 곡 장르 맞히면 진짜 음악 좀 아는 사람'],
+  '내 문구':[]
 };
-let hookCat='감성';
+/* 사용자가 고치거나 추가한 문구는 브라우저에 저장됩니다 */
+const HOOK_KEY='pulseorign.hooks.v1';
+let HOOKS=(()=>{ try{ const v=JSON.parse(localStorage.getItem(HOOK_KEY)||'null');
+    if(v&&typeof v==='object'){ const o={}; for(const k of Object.keys(HOOKS_DEFAULT))
+        o[k]=Array.isArray(v[k])?v[k].slice():HOOKS_DEFAULT[k].slice();
+      for(const k of Object.keys(v)) if(!(k in o)&&Array.isArray(v[k])) o[k]=v[k].slice();
+      return o; } }catch(e){}
+  return JSON.parse(JSON.stringify(HOOKS_DEFAULT)); })();
+function saveHooks(){ try{ localStorage.setItem(HOOK_KEY, JSON.stringify(HOOKS)); }catch(e){} }
+function hookPool(){ const p=HOOKS[hookCat]; return (p&&p.length)? p : (HOOKS['첫 소절']||['']); }
+let hookCat='첫 소절';
 const HK_STYLES=[['pop','팝아웃'],['neon','네온'],['box','박스'],['grad','그라디언트'],
                  ['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
-const hookSty={style:'pop', color:'#FFD400', color2:'#0B0B0D', anim:'pop'};
-function hookExtra(){ return {ofont:0, osize:1.25, ocolor:hookSty.color,
+const hookSty={style:'pop', color:'#FFD400', color2:'#0B0B0D', anim:'pop', font:0, size:1.25};
+function hookExtra(){ return {ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
   ocolor2:hookSty.color2, oink:'#0B0B0D',
   ostyle:hookSty.style, oanim:hookSty.anim}; }
 function renderHookStyle(){
@@ -7446,9 +7485,18 @@ function renderHookStyle(){
   mk(sr,HK_STYLES,hookSty.style,v=>{hookSty.style=v;});
   mk(cr,HK_COLORS,hookSty.color,v=>{hookSty.color=v; $('shColorCustom').value=v;},true);
   mk(ar,HK_ANIMS,hookSty.anim,v=>{hookSty.anim=v;});
+  const fsel=$('shFont');
+  if(fsel && !fsel.options.length)
+    fsel.innerHTML=FONTS.map((f,i)=>`<option value="${i}">${f.n}</option>`).join('');
+  if(fsel) fsel.value=String(hookSty.font);
+  if($('shSize')) $('shSize').value=String(Math.round(hookSty.size*100));
   const pv=$('shPrev').firstElementChild, C=hookSty.color, S=hookSty.style;
+  const F=FONTS[hookSty.font]||FONTS[0];
   pv.style.cssText='';
-  pv.textContent='이 노래 모르면 진짜 손해';
+  pv.style.fontFamily=`${F.fam},'Noto Sans KR',sans-serif`;
+  pv.style.fontWeight=(S==='plain'?F.weight:Math.max(F.weight,800));
+  pv.style.fontSize=Math.round(19*hookSty.size/1.25*F.mul)+'px';
+  pv.textContent='볼륨 올려. 3초 뒤에 알게 됨';
   if(S==='box'){ pv.style.background=C; pv.style.color='#0B0B0D'; pv.style.borderRadius='7px'; }
   else if(S==='hilite'){ pv.style.background=`linear-gradient(transparent 52%, ${C} 52%, ${C} 88%, transparent 88%)`; pv.style.color='#0B0B0D'; }
   else if(S==='neon'){ pv.style.color=C; pv.style.textShadow=`0 0 10px ${C},0 0 22px ${C}`; }
@@ -7463,17 +7511,45 @@ function renderHooks(){
   cr.innerHTML='';
   for(const k of Object.keys(HOOKS)){
     const b=document.createElement('button');
-    b.className='chip'+(k===hookCat?' on':''); b.textContent=k;
+    b.className='chip'+(k===hookCat?' on':'');
+    b.textContent=k+(HOOKS[k].length?` ${HOOKS[k].length}`:'');
     b.onclick=()=>{ hookCat=k; renderHooks(); };
     cr.appendChild(b);
   }
   lr.innerHTML='';
-  for(const t of HOOKS[hookCat]){
-    const b=document.createElement('button');
-    b.className='chip hk-item'; b.textContent=t;
-    b.onclick=()=>addHookOverlay(t);
-    lr.appendChild(b);
+  const list=HOOKS[hookCat]||[];
+  if(!list.length){
+    const e=document.createElement('div'); e.className='hint2';
+    e.textContent='이 카테고리는 비어 있습니다 — 아래 칸에 직접 써넣어 보세요.';
+    lr.appendChild(e);
   }
+  list.forEach((t,i)=>{
+    const row=document.createElement('div'); row.className='hkrow';
+    const use=document.createElement('button');
+    use.className='chip hk-item'; use.textContent=t; use.title='누르면 재생 헤드 위치에 넣습니다';
+    use.onclick=()=>addHookOverlay(t);
+    const ed=document.createElement('button'); ed.className='mini'; ed.textContent='✎'; ed.title='문구 수정';
+    const rm=document.createElement('button'); rm.className='mini'; rm.textContent='✕'; rm.title='문구 삭제';
+    ed.onclick=()=>{
+      const inp=document.createElement('input'); inp.className='hkedit'; inp.value=t;
+      row.replaceChild(inp,use); inp.focus(); inp.select();
+      let closed=false;
+      const fin=(ok)=>{ if(closed) return; closed=true;
+        const v=inp.value.trim();
+        if(ok&&v) HOOKS[hookCat][i]=v; else if(ok&&!v) HOOKS[hookCat].splice(i,1);
+        saveHooks(); renderHooks(); };
+      inp.addEventListener('keydown',e=>{ if(e.key==='Enter') fin(true); if(e.key==='Escape') fin(false); });
+      inp.addEventListener('blur',()=>fin(true));
+    };
+    rm.onclick=()=>{ HOOKS[hookCat].splice(i,1); saveHooks(); renderHooks(); };
+    row.append(use,ed,rm); lr.appendChild(row);
+  });
+}
+function addHookPhrase(v){
+  v=(v||'').trim(); if(!v) return false;
+  (HOOKS[hookCat]=HOOKS[hookCat]||[]).push(v); saveHooks(); renderHooks();
+  setStatus(`「${hookCat}」에 문구를 저장했습니다.`);
+  return true;
 }
 /* 후킹 문구를 상단 텍스트 오버레이로 추가 */
 function addHookOverlay(text, atT, dur){
@@ -7493,8 +7569,19 @@ function addHookOverlay(text, atT, dur){
   return clip;
 }
 $('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); });
+$('shFont').addEventListener('change',e=>{ hookSty.font=+e.target.value; renderHookStyle(); });
+$('shSize').addEventListener('input',e=>{ hookSty.size=clamp(+e.target.value||125,50,260)/100; renderHookStyle(); });
+$('shHookSave').onclick=()=>{ const el=$('shHookCustom'); if(addHookPhrase(el.value)) el.value=''; };
+$('shHookReset').onclick=()=>{
+  if(!HOOKS_DEFAULT[hookCat]){ setStatus('직접 만든 카테고리라 기본값이 없습니다.'); return; }
+  if(!confirm(`「${hookCat}」의 문구를 기본값으로 되돌릴까요? 이 카테고리에 직접 넣은 문구는 사라집니다.`)) return;
+  HOOKS[hookCat]=HOOKS_DEFAULT[hookCat].slice(); saveHooks(); renderHooks();
+  setStatus(`「${hookCat}」를 기본 문구로 되돌렸습니다.`); };
 $('shHookAdd').onclick=()=>{ const v=$('shHookCustom').value.trim(); if(v) addHookOverlay(v); };
-$('shHookCustom').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const v=e.target.value.trim(); if(v) addHookOverlay(v); }});
+$('shHookCustom').addEventListener('keydown',e=>{
+  if(e.key!=='Enter') return;
+  const v=e.target.value.trim(); if(!v) return;
+  addHookPhrase(v); addHookOverlay(v); e.target.value=''; });
 
 /* ── 쇼츠 최적화 / 복원 ── */
 const SHORTS_KEYS=['ratio','el','titleScale','glow','titleFx','shadowOn','vignette','progressBar','subStyle','trackLabel'];
@@ -7661,7 +7748,7 @@ $('shBuild').onclick=()=>{
   const cs=plClips().filter(c=>c.assetId&&A(c.assetId));
   if(!cs.length){ setStatus('플레이리스트에 곡이 없습니다.'); return; }
   const want=clamp(+$('shLen').value||30,10,60);
-  const pool=HOOKS[hookCat];
+  const pool=hookPool();
   shortsQueue=cs.map((c,i)=>{
     const a=A(c.assetId);
     const title=c.title||(a?a.name:'');
@@ -7679,7 +7766,7 @@ $('shAddHere').onclick=()=>{
   const lim=c? clipEnd(c) : tlDuration();
   const dur=Math.min(want, lim-t);
   if(dur<=3){ setStatus('현재 위치에서 남은 길이가 너무 짧습니다.'); return; }
-  const pool=HOOKS[hookCat];
+  const pool=hookPool();
   shortsQueue.push({clipId:c?c.id:null, title:title||`구간 ${fmtT(t)}`, start:+t.toFixed(2), dur,
     hook:pool[shortsQueue.length%pool.length].replace(/\{제목\}/g,title)});
   renderShortsList();
