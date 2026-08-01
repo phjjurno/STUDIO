@@ -6583,6 +6583,38 @@ const shade=(hex,amt)=>{ const m=/^#?([\da-fA-F]{6})$/.exec(String(hex||'').repl
   const n=parseInt(m[1],16), f=v=>Math.round(clamp(amt<0? v*(1+amt) : v+(255-v)*amt,0,255));
   return '#'+[f(n>>16&255),f(n>>8&255),f(n&255)].map(v=>v.toString(16).padStart(2,'0')).join(''); };
 const easeOutBack=k=>{ const c1=1.70158, c3=c1+1; return 1+c3*Math.pow(k-1,3)+c1*Math.pow(k-1,2); };
+/* 폭을 넘으면 아랫줄로 — 공백 우선, 공백이 없으면 글자 단위 */
+function wrapLines(g, text, maxW){
+  const out=[];
+  for(const raw of String(text==null?'':text).split('\n')){
+    if(!raw){ out.push(''); continue; }
+    if(g.measureText(raw).width<=maxW){ out.push(raw); continue; }
+    let cur='';
+    for(const chn of Array.from(raw)){
+      if(cur && g.measureText(cur+chn).width>maxW){
+        const bi=cur.lastIndexOf(' ');
+        if(bi>0){ out.push(cur.slice(0,bi)); cur=cur.slice(bi+1).trimStart()+chn; }
+        else { out.push(cur); cur=(chn===' '?'':chn); }
+      } else cur+=chn;
+    }
+    if(cur.trim()) out.push(cur);
+  }
+  return out.length? out : [''];
+}
+/* 배너용 두 줄 나누기 — 글자 수가 가장 고르게 갈리는 띄어쓰기에서 끊습니다
+   (같으면 앞줄을 길게 둬서 뒷줄이 더 크게 강조되도록) */
+function splitBalanced(text){
+  const raw=String(text==null?'':text).trim();
+  const ws=raw.split(/\s+/).filter(Boolean);
+  if(ws.length<2) return [raw];
+  const len=a=>a.join(' ').length;
+  let best=1, bestD=1e9;
+  for(let k=1;k<ws.length;k++){
+    const d=Math.abs(len(ws.slice(0,k))-len(ws.slice(k)));
+    if(d<bestD || (d===bestD && len(ws.slice(0,k))>=len(ws.slice(k)))){ bestD=d; best=k; }
+  }
+  return [ws.slice(0,best).join(' '), ws.slice(best).join(' ')];
+}
 function drawOverlays(t){
   const {g,w,h}=R;
   for(const tr of state.tracks) if(tr.kind==='over')
@@ -6596,13 +6628,30 @@ function drawOverlays(t){
       const portrait=h>w;
       const fs=Math.round(w*(portrait?.05:.036)*(c.osize||1)*F.mul);
       const sty=c.ostyle||'plain', col=c.ocolor||'#FFFFFF', col2=c.ocolor2||'#000000';
-      const lines=(c.otext||'').split('\n');
-      const lh=fs*1.3, x=c.tx.x*w, y0=c.tx.y*h-(lines.length-1)*lh/2;
       g.save();
       g.globalAlpha=clamp(alpha,0,1);
       g.textAlign='center'; g.textBaseline='alphabetic';
       const weight=(sty==='plain')? F.weight : Math.max(F.weight,800);
-      g.font=`${weight} ${fs}px ${F.fam},'Noto Sans KR',sans-serif`;
+      const setF=fz=>g.font=`${weight} ${fz}px ${F.fam},'Noto Sans KR',sans-serif`;
+      setF(fs);
+      const maxW=w*(sty==='banner'?.92:.88);
+      /* 배너는 두 줄로 고르게 끊은 뒤 줄마다 폭에 꽉 차게 키웁니다
+         (한 줄로 길게 늘어놓는 것보다 썸네일처럼 읽힘) */
+      let lines;
+      if(sty==='banner'){
+        lines=[];
+        for(const part of String(c.otext==null?'':c.otext).split('\n'))
+          for(const half of splitBalanced(part))
+            lines.push(...wrapLines(g, half, maxW*1.9));
+        if(!lines.length) lines=[''];
+      } else lines=wrapLines(g, c.otext, maxW);
+      const lh=fs*1.3, x=c.tx.x*w;
+      let y0=c.tx.y*h-(lines.length-1)*lh/2;
+      if(sty!=='banner'){   /* 줄이 늘어나 화면 위/아래로 넘치면 안쪽으로 밀어 넣음 */
+        const top=y0-fs*.95, bot=y0+lh*(lines.length-1)+fs*.32;
+        if(top<h*.02) y0+=h*.02-top;
+        else if(bot>h*.98) y0-=bot-h*.98;
+      }
       let mw=0; lines.forEach(L=>mw=Math.max(mw,g.measureText(L).width));
       /* 등장 모션 */
       const anim=c.oanim||'pop';
@@ -6614,6 +6663,29 @@ function drawOverlays(t){
           else sc=.85+.15*k; }
         if(anim==='pulse') sc*=1+Math.sin(lt*6.2)*.022;
         g.translate(x, y0+dy); g.scale(sc,sc); g.translate(-x,-y0);
+      }
+      /* ── 썸네일 배너: 검은 띠 + 줄마다 폭에 꽉 차게, 첫 줄만 강조색 ── */
+      if(sty==='banner'){
+        const scales=lines.map(L=>{ const lw=g.measureText(L).width||1;
+          return clamp(maxW/lw, .5, 1.6); });
+        const sizes=scales.map(k=>Math.round(fs*k));
+        const gap=fs*.16;
+        let totH=0; sizes.forEach(fz=>totH+=fz*1.18); totH+=gap*(lines.length-1);
+        let top=c.tx.y*h-totH/2-fs*.30;
+        if(top<h*.10) top=0;                      /* 위쪽이면 화면 끝에 딱 붙임 */
+        const padY=fs*.34;
+        g.save(); g.shadowBlur=0; g.shadowOffsetY=0;
+        g.fillStyle=c.oband||'#000000';
+        g.fillRect(0, top, w, totH+padY*2);
+        g.restore();
+        let cy=top+padY;
+        lines.forEach((L,i)=>{ const fz=sizes[i]; setF(fz); cy+=fz*.94;
+          g.fillStyle=(i===0? col : (c.oink2||'#FFFFFF'));
+          g.fillText(L, x, cy);
+          cy+=fz*.24+gap; });
+        g.restore();
+        if(R.preview) HIT.push({id:'ov:'+c.id, x:0, y:top, w, h:totH+padY*2});
+        continue;
       }
       /* 배경/하이라이트 */
       if(sty==='box'||sty==='hilite'){
@@ -7477,13 +7549,13 @@ function applyHookStyle(){
 }
 function hookPool(){ const p=HOOKS[hookCat]; return (p&&p.length)? p : (HOOKS['첫 소절']||['']); }
 let hookCat='첫 소절';
-const HK_STYLES=[['pop','팝아웃'],['neon','네온'],['box','박스'],['grad','그라디언트'],
-                 ['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
+const HK_STYLES=[['banner','썸네일 배너'],['pop','팝아웃'],['neon','네온'],['box','박스'],
+                 ['grad','그라디언트'],['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
-const hookSty={style:'pop', color:'#FFD400', color2:'#0B0B0D', anim:'pop', font:0, size:1.25, hold:true};
+const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', anim:'pop', font:0, size:1.25, hold:true};
 function hookExtra(){ return {ohook:true, ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
-  ocolor2:hookSty.color2, oink:'#0B0B0D',
+  ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:'#FFFFFF', oband:'#000000',
   ostyle:hookSty.style, oanim:hookSty.anim}; }
 function renderHookStyle(){
   const sr=$('shStyleRow'), cr=$('shColorRow'), ar=$('shAnimRow'); if(!sr) return;
@@ -7508,6 +7580,17 @@ function renderHookStyle(){
   pv.style.fontWeight=(S==='plain'?F.weight:Math.max(F.weight,800));
   pv.style.fontSize=Math.round(19*hookSty.size/1.25*F.mul)+'px';
   pv.textContent='볼륨 올려. 3초 뒤에 알게 됨';
+  $('shPrev').style.background='';
+  if(S==='banner'){
+    $('shPrev').style.background='#000';
+    pv.textContent='';
+    pv.style.display='block'; pv.style.textAlign='center'; pv.style.lineHeight='1.12';
+    const l1=document.createElement('div'), l2=document.createElement('div');
+    l1.textContent='볼륨 올려. 3초 뒤에'; l1.style.color=C;
+    l2.textContent='알게 됨'; l2.style.color='#FFFFFF'; l2.style.fontSize='1.18em';
+    pv.append(l1,l2);
+    return;
+  }
   if(S==='box'){ pv.style.background=C; pv.style.color='#0B0B0D'; pv.style.borderRadius='7px'; }
   else if(S==='hilite'){ pv.style.background=`linear-gradient(transparent 52%, ${C} 52%, ${C} 88%, transparent 88%)`; pv.style.color='#0B0B0D'; }
   else if(S==='neon'){ pv.style.color=C; pv.style.textShadow=`0 0 10px ${C},0 0 22px ${C}`; }
