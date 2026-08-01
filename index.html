@@ -693,6 +693,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <span class="hint2" style="margin:0">등장</span>
         <div class="row" id="shAnimRow" style="gap:4px"></div>
       </div>
+      <label class="row" style="margin-top:8px;gap:6px;align-items:center;cursor:pointer;font-size:12px;color:var(--dim)">
+        <input type="checkbox" id="shHold" checked> 영상 끝까지 띄우기 <small class="usuf">(끄면 3초)</small></label>
       <div id="shPrev" class="shprev"><span></span></div>
       <div class="row" id="shHookCat" style="margin-top:10px"></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
@@ -7464,14 +7466,23 @@ let HOOKS=(()=>{ try{ const v=JSON.parse(localStorage.getItem(HOOK_KEY)||'null')
       return o; } }catch(e){}
   return JSON.parse(JSON.stringify(HOOKS_DEFAULT)); })();
 function saveHooks(){ try{ localStorage.setItem(HOOK_KEY, JSON.stringify(HOOKS)); }catch(e){} }
+/* 스타일을 바꾸면 이미 타임라인에 들어간 후킹 문구에도 그대로 반영 */
+function applyHookStyle(){
+  const T=state.tracks.find(t=>t.kind==='over'); if(!T) return 0;
+  const ex=hookExtra(); delete ex.ohook;
+  let n=0;
+  for(const c of T.clips) if(c.ohook){ Object.assign(c,ex); n++; }
+  if(n){ renderTL(); drawNow(); }
+  return n;
+}
 function hookPool(){ const p=HOOKS[hookCat]; return (p&&p.length)? p : (HOOKS['첫 소절']||['']); }
 let hookCat='첫 소절';
 const HK_STYLES=[['pop','팝아웃'],['neon','네온'],['box','박스'],['grad','그라디언트'],
                  ['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
-const hookSty={style:'pop', color:'#FFD400', color2:'#0B0B0D', anim:'pop', font:0, size:1.25};
-function hookExtra(){ return {ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
+const hookSty={style:'pop', color:'#FFD400', color2:'#0B0B0D', anim:'pop', font:0, size:1.25, hold:true};
+function hookExtra(){ return {ohook:true, ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
   ocolor2:hookSty.color2, oink:'#0B0B0D',
   ostyle:hookSty.style, oanim:hookSty.anim}; }
 function renderHookStyle(){
@@ -7481,7 +7492,7 @@ function renderHookStyle(){
       const b=document.createElement('button'); b.className='chip'+(v===cur?' on':'');
       if(paint){ b.style.background=v; b.style.borderColor=(v===cur?'var(--amber)':'transparent'); b.title=v; }
       else b.textContent=lab;
-      b.onclick=()=>{ set(v); renderHookStyle(); }; box.appendChild(b); } };
+      b.onclick=()=>{ set(v); renderHookStyle(); applyHookStyle(); }; box.appendChild(b); } };
   mk(sr,HK_STYLES,hookSty.style,v=>{hookSty.style=v;});
   mk(cr,HK_COLORS,hookSty.color,v=>{hookSty.color=v; $('shColorCustom').value=v;},true);
   mk(ar,HK_ANIMS,hookSty.anim,v=>{hookSty.anim=v;});
@@ -7561,16 +7572,34 @@ function addHookOverlay(text, atT, dur){
   if(!title && cs.length){ const a=A(cs[0].assetId); title=cs[0].title||(a?a.name:''); }
   const txt=String(text).replace(/\{제목\}/g, title||'');
   pushUndo();
-  const clip=newClip(null, start, dur||3, Object.assign({otext:txt}, hookExtra()));
+  let len=dur;
+  if(len==null){
+    if(hookSty.hold){
+      const seg=cs.find(x=>start>=x.start-.001 && start<clipEnd(x));
+      const lim=seg? clipEnd(seg) : tlDuration();
+      len=Math.max(1, lim-start);
+    } else len=3;
+  }
+  const clip=newClip(null, start, len, Object.assign({otext:txt}, hookExtra()));
   clip.tx.y=0.16;                       /* 쇼츠 상단 안전영역 */
   T2.clips.push(clip);
   renderAll();
   setStatus(`후킹 문구 추가: “${txt}”`);
   return clip;
 }
-$('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); });
-$('shFont').addEventListener('change',e=>{ hookSty.font=+e.target.value; renderHookStyle(); });
-$('shSize').addEventListener('input',e=>{ hookSty.size=clamp(+e.target.value||125,50,260)/100; renderHookStyle(); });
+$('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); applyHookStyle(); });
+$('shFont').addEventListener('change',e=>{ hookSty.font=+e.target.value; renderHookStyle(); applyHookStyle(); });
+$('shSize').addEventListener('input',e=>{ hookSty.size=clamp(+e.target.value||125,50,260)/100; renderHookStyle(); applyHookStyle(); });
+$('shHold').addEventListener('change',e=>{
+  hookSty.hold=e.target.checked;
+  const T=state.tracks.find(t=>t.kind==='over');
+  let n=0;
+  if(T) for(const c of T.clips) if(c.ohook){
+    const seg=plClips().find(x=>c.start>=x.start-.001 && c.start<clipEnd(x));
+    const lim=seg? clipEnd(seg) : tlDuration();
+    c.dur=hookSty.hold? Math.max(1, lim-c.start) : 3; n++; }
+  if(n){ renderTL(); drawNow(); }
+  setStatus(hookSty.hold? '후킹 문구를 영상 끝까지 띄웁니다.' : '후킹 문구를 3초만 띄웁니다.'); });
 $('shHookSave').onclick=()=>{ const el=$('shHookCustom'); if(addHookPhrase(el.value)) el.value=''; };
 $('shHookReset').onclick=()=>{
   if(!HOOKS_DEFAULT[hookCat]){ setStatus('직접 만든 카테고리라 기본값이 없습니다.'); return; }
@@ -7796,7 +7825,9 @@ $('shExportAll').onclick=async()=>{
     /* 후킹 오버레이 삽입 */
     let hookClip=null;
     if(it.hook){
-      hookClip=newClip(null, it.start+0.15, Math.min(3.2, it.dur-0.3),
+      const segLen=Math.min(want, it.dur);
+      hookClip=newClip(null, it.start+0.15,
+        hookSty.hold? Math.max(1, segLen-0.15) : Math.min(3.2, it.dur-0.3),
         Object.assign({otext:it.hook}, hookExtra()));
       hookClip.tx.y=0.16;
       T2.clips.push(hookClip);
