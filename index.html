@@ -633,7 +633,14 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-tpl="karaoke">노래방 채움</button>
         <button class="chip" data-tpl="box">박스 배경</button>
         <button class="chip" data-tpl="grad">그라데이션 볼드</button>
+        <button class="chip" data-tpl="editorial">에디토리얼</button>
+        <button class="chip" data-tpl="chroma">크로마 오프셋</button>
+        <button class="chip" data-tpl="tape">테이프</button>
+        <button class="chip" data-tpl="blockrev">블록 리빌</button>
+        <button class="chip" data-tpl="hollow">아웃라인</button>
+        <button class="chip" data-tpl="marker">마커 스와이프</button>
       </div>
+      <div class="hint2" style="margin-top:6px">뒤쪽 6종은 타이포그래피 스타일입니다. SRT처럼 단어 시각이 없는 자막도 자동으로 배분해 단어 단위로 움직입니다 — <b>강조 색</b>이 스타일의 포인트 색으로 쓰입니다.</div>
       <div class="opt-label">폰트</div>
       <div class="prow"><select id="subFontSel"></select></div>
       <div class="sliders">
@@ -6769,20 +6776,29 @@ function drawSubs(t){
   const F=FONTS[st.fontIdx]||FONTS[0];
   const portrait=h>w;
   let fs=Math.round(w*(portrait?.046:.03)*st.size*F.mul);
-  const weight=st.template==='grad'? 900 : (F.weight===400?700:F.weight);
+  const T=st.template;
+  const weight=(T==='grad'||T==='blockrev')? 900 : (T==='editorial'? Math.max(500,F.weight) : (F.weight===400?700:F.weight));
   const font=fz=>`${weight} ${fz}px ${F.fam},'Noto Sans KR',sans-serif`;
   g.save();
   g.textAlign='left'; g.textBaseline='alphabetic';
   g.font=font(fs);
+  /* 자간 — 에디토리얼·아웃라인은 넓은 자간이 인상을 만든다.
+     measureText도 자간을 반영하므로 줄바꿈 계산 전에 걸어야 위치가 맞는다. */
+  const track = T==='editorial'? fs*.14 : T==='hollow'? fs*.05 : 0;
+  const hasLS=('letterSpacing' in g);
+  if(hasLS) g.letterSpacing = track? track.toFixed(2)+'px' : '0px';
+  /* 라틴 문자만 대문자로 (한글은 대소문자가 없어 영향 없음) */
+  const caps = T==='editorial';
   const lt=t-c.start;
   const words=(c.words&&c.words.length)? c.words : evenWords(c);
   /* 줄바꿈 레이아웃 */
   const maxW=w*.86, spaceW=g.measureText(' ').width;
   const lines=[]; let cur=[], curW=0;
   for(const wd of words){
-    const ww=g.measureText(wd[2]).width;
+    const txt=caps? String(wd[2]).toUpperCase() : wd[2];
+    const ww=g.measureText(txt).width;
     if(cur.length&&curW+spaceW+ww>maxW){ lines.push(cur); cur=[]; curW=0; }
-    cur.push({t0:wd[0],t1:wd[1],txt:wd[2],w:ww});
+    cur.push({t0:wd[0],t1:wd[1],txt,w:ww});
     curW+=(cur.length>1?spaceW:0)+ww;
   }
   if(cur.length) lines.push(cur);
@@ -6799,9 +6815,29 @@ function drawSubs(t){
   }
   let alpha= st.anim? Math.min(1, lt/.15) : 1;
   g.globalAlpha=clamp(alpha,0,1);
-  const T=st.template;
   const shadow=on=>{ if(on){ g.shadowColor='rgba(0,0,0,.6)'; g.shadowBlur=w*.005; g.shadowOffsetY=2; }
     else { g.shadowColor='transparent'; g.shadowBlur=0; g.shadowOffsetY=0; } };
+  /* 한 줄이 얼마나 읽혔는지 (0~1) — 단어 타이밍을 이어 붙여 선형 보간.
+     SRT처럼 단어 시각이 없는 자막도 evenWords가 균등 배분해 주므로 그대로 쓸 수 있다. */
+  const lineProg=L=>{
+    if(!L.length) return 0;
+    if(lt>=L[L.length-1].t1) return 1;
+    let p=0;
+    for(const wd of L){
+      if(lt>=wd.t1){ p=(wd.x+wd.w-L[0].x)/L.tw; continue; }
+      if(lt>=wd.t0){ p=(wd.x-L[0].x+wd.w*((lt-wd.t0)/Math.max(.01,wd.t1-wd.t0)))/L.tw; }
+      break;
+    }
+    return clamp(p,0,1);
+  };
+  const ease=x=>1-Math.pow(1-clamp(x,0,1),3);
+  /* 색 면 위에 얹을 글자색 — 강조 색을 어둡게 골라도 글자가 묻히지 않게 밝기로 고른다 */
+  const inkOn=hex=>{
+    const m=/^#?([0-9a-f]{6})$/i.exec(hex||''); if(!m) return '#14151A';
+    const v=parseInt(m[1],16), r=(v>>16)&255, gg=(v>>8)&255, b=v&255;
+    return (.299*r+.587*gg+.114*b)>140? '#14151A' : '#FFFFFF';
+  };
+  const INK=inkOn(st.color2);
 
   lines.forEach((L,li)=>{
     const ly=y0+li*lineH;
@@ -6881,6 +6917,129 @@ function drawSubs(t){
         for(const wd of L) g.fillText(wd.txt,wd.x,ly);
         g.restore();
       }
+
+    /* ══════ 타이포그래피 스타일 ══════ */
+    }else if(T==='editorial'){
+      /* 에디토리얼 — 넓은 자간 + 위아래 헤어라인. 잡지 캡션처럼 절제된 인상 */
+      const rw=st.anim? ease(lt/.5) : 1;                 /* 선이 좌우로 그어지며 등장 */
+      const half=(L.tw+fs*.9)/2*rw;
+      g.shadowColor='rgba(0,0,0,.45)'; g.shadowBlur=w*.004; g.shadowOffsetY=1;
+      g.fillStyle=st.color;
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+      shadow(false);
+      if(li===0||li===lines.length-1){
+        g.fillStyle=hexA(st.color2,.9);
+        const hl=Math.max(1,fs*.035);
+        if(li===0)               g.fillRect(cx-half, y0-fs*1.5, half*2, hl);
+        if(li===lines.length-1)  g.fillRect(cx-half, ly+fs*.5, half*2, hl);
+      }
+
+    }else if(T==='chroma'){
+      /* 크로마 오프셋 — 시안·마젠타를 어긋나게 겹쳐 찍는 요즘 감성.
+         새 단어가 나올 때 어긋남이 커졌다가 붙는다 */
+      let kick=0;
+      for(const wd of L){ const age=lt-wd.t0; if(age>=0&&age<.2) kick=Math.max(kick,1-age/.2); }
+      const dx=fs*(.055+.10*kick), dy=fs*.012*kick;
+      shadow(false);
+      g.save(); g.globalCompositeOperation='lighter';
+      g.fillStyle='rgba(0,229,255,.95)';
+      for(const wd of L) g.fillText(wd.txt,wd.x-dx,ly-dy);
+      g.fillStyle='rgba(255,0,144,.95)';
+      for(const wd of L) g.fillText(wd.txt,wd.x+dx,ly+dy);
+      g.restore();
+      g.fillStyle=st.color;
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+
+    }else if(T==='tape'){
+      /* 테이프 — 살짝 기울인 색 띠 위에 글자를 찍어낸 스티커/진(zine) 느낌 */
+      const rot=(li%2? 1:-1)*0.042;                      /* 손으로 붙인 듯 또렷하게 기울임 */
+      const padX=fs*.62, padY=fs*.42;
+      const bx=lx-padX, by=ly-fs-padY*.55, bw=L.tw+padX*2, bh=fs+padY*1.5;
+      g.save();
+      g.translate(cx, ly-fs*.35); g.rotate(rot); g.translate(-cx, -(ly-fs*.35));
+      g.shadowColor='rgba(0,0,0,.5)'; g.shadowBlur=w*.008; g.shadowOffsetY=fs*.09;
+      g.fillStyle=st.color2;
+      g.beginPath();                                     /* 양끝을 톱니처럼 찢어 테이프 느낌 */
+      const teeth=5, th=fs*.075;
+      g.moveTo(bx,by);
+      for(let k=1;k<=teeth;k++) g.lineTo(bx+(k%2?th:0), by+bh*k/teeth);
+      g.lineTo(bx+bw,by+bh);
+      for(let k=1;k<=teeth;k++) g.lineTo(bx+bw-(k%2?th:0), by+bh-bh*k/teeth);
+      g.closePath(); g.fill();
+      shadow(false);
+      g.save(); g.clip();
+      g.fillStyle='rgba(255,255,255,.22)';               /* 비닐 광택 */
+      g.fillRect(bx,by,bw,bh*.34);
+      g.fillStyle='rgba(0,0,0,.07)';                     /* 테이프 결 */
+      for(let k=1;k<=3;k++) g.fillRect(bx,by+bh*k/4,bw,Math.max(1,fs*.022));
+      g.restore();
+      g.fillStyle=INK;
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+      g.restore();
+
+    }else if(T==='blockrev'){
+      /* 블록 리빌 — 색 블록이 훑고 지나가며 글자가 드러난다 */
+      const p=st.anim? lineProg(L) : 1;
+      shadow(false);
+      g.fillStyle=hexA(st.color,.16);                    /* 아직 안 지나간 부분은 흐리게 */
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+      if(p>0){
+        g.save();
+        g.beginPath(); g.rect(lx-fs*.1, ly-fs*1.2, L.tw*p+fs*.1, fs*1.6); g.clip();
+        g.fillStyle=st.color;
+        for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+        g.restore();
+      }
+      if(p>0&&p<1){                                      /* 진행 지점의 색 블록 */
+        g.fillStyle=st.color2;
+        g.fillRect(lx+L.tw*p, ly-fs*1.02, Math.max(2,fs*.14), fs*1.24);
+      }
+
+    }else if(T==='hollow'){
+      /* 아웃라인 — 속이 빈 글자, 지나간 단어만 채운다 */
+      g.lineJoin='round'; g.miterLimit=2;
+      shadow(true);
+      g.strokeStyle=st.color; g.lineWidth=Math.max(1.5,fs*.045);
+      for(const wd of L) g.strokeText(wd.txt,wd.x,ly);
+      shadow(false);
+      /* 지금 읽는 단어만 꽉 채우고 지나간 단어는 옅게 — 속 빈 글자라는 인상을 끝까지 남긴다 */
+      for(const wd of L){
+        if(lt<wd.t0) continue;
+        const act=lt<wd.t1, age=lt-wd.t0;
+        g.globalAlpha=clamp(alpha*(act? (st.anim? Math.min(1,age/.18):1) : .14),0,1);
+        g.fillStyle= act? st.color2 : st.color;
+        g.fillText(wd.txt,wd.x,ly);
+      }
+      g.globalAlpha=clamp(alpha,0,1);
+
+    }else if(T==='marker'){
+      /* 마커 스와이프 — 형광펜이 손으로 그은 듯 번지며 지나간다 */
+      const p=st.anim? lineProg(L) : 1;
+      shadow(false);
+      if(p>0){
+        g.save();
+        g.globalAlpha=clamp(alpha*.85,0,1);
+        g.fillStyle=st.color2;
+        const bx=lx-fs*.18, bw=(L.tw+fs*.36)*p;
+        const jt=fs*.075, N2=9;                          /* 가장자리를 크게 흔들어 손으로 그은 느낌 */
+        g.beginPath();
+        g.moveTo(bx, ly-fs*.78+rand1(li*3.1)*jt);
+        for(let k=1;k<=N2;k++)
+          g.lineTo(bx+bw*k/N2, ly-fs*.78+rand1(li*3.1+k*1.7)*jt);
+        for(let k=N2;k>=0;k--)
+          g.lineTo(bx+bw*k/N2, ly+fs*.24-rand1(li*7.7+k*2.3)*jt);
+        g.closePath(); g.fill();
+        g.restore();
+      }
+      g.globalAlpha=clamp(alpha,0,1);
+      g.fillStyle= p>.02? INK : st.color;
+      for(const wd of L){
+        const done=(wd.x+wd.w-lx)/L.tw <= p+.02;
+        g.fillStyle= done? INK : st.color;
+        if(!done) shadow(true); else shadow(false);
+        g.fillText(wd.txt,wd.x,ly);
+      }
+      shadow(false);
     }
   });
   g.restore();
