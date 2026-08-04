@@ -480,7 +480,16 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-tfx="longshadow">롱 섀도우</button>
         <button class="chip" data-tfx="chrome">크롬</button>
         <button class="chip" data-tfx="neonsign">네온 사인</button>
+        <button class="chip" data-tfx="tape">테이프</button>
+        <button class="chip" data-tfx="spray">스프레이</button>
+        <button class="chip" data-tfx="steel">스틸</button>
+        <button class="chip" data-tfx="sticker">스티커</button>
+        <button class="chip" data-tfx="holo">홀로그램</button>
+        <button class="chip" data-tfx="riso">리소 그레인</button>
       </div>
+      <div class="opt-label">제목 색감</div>
+      <div class="row" id="titleHueRow"></div>
+      <div class="hint2" style="margin-top:6px">색감은 <b>제목 색</b>을 바꿉니다. 테이프는 이 색이 띠 색이 되고 글자는 밝기에 따라 자동으로 검정/흰색이 됩니다.</div>
       <div class="opt-label">트랙 번호 라벨 (TRACK 01 / 08)</div>
       <div class="row">
         <button class="chip on" id="tlbShowBtn">라벨 표시</button>
@@ -2918,7 +2927,14 @@ const yieldTask=()=>new Promise(r=>{const c=new MessageChannel();c.port1.onmessa
 let encoderPickNote='';
 let batchMode=false, exportNameOverride='';
 /* 후보 설정을 짧게 실제 인코딩해 처리량을 재고 가장 빠른 것을 선택 */
-async function probeEncoder(baseCfg, W, H, FPS){
+/* 후보를 실제로 돌려보고 제일 빠른 인코더 설정을 고른다.
+   측정 조건이 내보내기와 달라지면 엉뚱한 걸 고른다. 예전엔 10프레임·큐 깊이 4로 쟀는데,
+   그건 프레임을 여러 장 물고 처리하는 quality에 불리하고 latency만 짧은 realtime에
+   유리한 조건이라 항상 realtime이 뽑혔다. 그 결과 1080p30이 5.9 → 1.5배속,
+   4K60이 1.1 → 0.5배속으로 떨어졌다(실측).
+   그래서 (1) 내보내기와 같은 큐 깊이로 돌리고 (2) 앞쪽 워밍업 구간을 빼고
+   (3) flush를 시간 측정에서 제외해 '지속 처리량'을 재도록 했다. */
+async function probeEncoder(baseCfg, W, H, FPS, qmax){
   const cands=[
     {acc:'prefer-hardware', mode:'quality'},
     {acc:'prefer-hardware', mode:'realtime'},
@@ -2927,9 +2943,10 @@ async function probeEncoder(baseCfg, W, H, FPS){
   ];
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const cx=cv.getContext('2d',{alpha:false});
-  const NPROBE=10;
+  const NWARM=8, NMEAS=28, NPROBE=NWARM+NMEAS;     /* 워밍업 뒤 구간만 측정 */
+  const QP=Math.max(2, qmax|0 || 8);               /* 내보내기와 같은 큐 깊이 */
   let best=null; const log=[];
-  const budget=performance.now()+4000;              /* 프로브 전체 상한 */
+  const budget=performance.now()+7000;             /* 프로브 전체 상한 */
   for(const {acc,mode} of cands){
     const cfg={...baseCfg, latencyMode:mode};
     if(acc) cfg.hardwareAcceleration=acc;
@@ -2940,22 +2957,23 @@ async function probeEncoder(baseCfg, W, H, FPS){
     const enc=new VideoEncoder({output:()=>done++, error:e=>{err=e;}});
     try{ enc.configure(cfg); }catch(e){ err=e; }
     if(err){ try{enc.close();}catch(_){} continue; }
-    const t0=performance.now();
+    let t0=performance.now(), ms=0;
     try{
       for(let f=0;f<NPROBE;f++){
+        if(f===NWARM) t0=performance.now();         /* 파이프라인이 찬 뒤부터 측정 */
         cx.fillStyle=`hsl(${f*24},55%,42%)`; cx.fillRect(0,0,W,H);
         cx.fillStyle='#fff'; cx.fillRect((f*37)%W, H*0.3, W*0.2, H*0.25);
         const vf=new VideoFrame(cv,{timestamp:Math.round(f*1e6/FPS),duration:Math.round(1e6/FPS)});
         enc.encode(vf,{keyFrame:f===0}); vf.close();
         const w0=performance.now();
-        while(enc.encodeQueueSize>4 && !err && performance.now()-w0<3000) await encWait(enc);
+        while(enc.encodeQueueSize>QP && !err && performance.now()-w0<3000) await encWait(enc);
       }
+      ms=performance.now()-t0;                      /* flush는 지속 처리량이 아니라 제외 */
       await withTimeout(enc.flush(), 5000, 'probe flush');
     }catch(e){ err=e; }
-    const ms=performance.now()-t0;
     try{ enc.close(); }catch(_){}
-    if(err||done===0) continue;
-    const fps=NPROBE/(ms/1000);
+    if(err||done===0||ms<=0) continue;
+    const fps=NMEAS/(ms/1000);
     log.push(`${acc||'auto'}/${mode}: ${fps.toFixed(0)}fps`);
     if(!best || fps>best.fps) best={cfg, fps, label:`${acc||'auto'} · ${mode}`};
   }
@@ -5825,6 +5843,41 @@ function drawTitle(title, idx, total, progress, tNow){
   {
     const TXT=title||' ', TY=ty+rise, TC=state.titleColor;
     const fx=state.titleFx||'none';
+    const TW=g.measureText(TXT).width;
+    /* 질감이 얹히는 면 위 글자색 — 강조 면을 어둡게 잡아도 묻히지 않게 밝기로 고른다 */
+    const tInk=(()=>{ const m=/^#?([0-9a-f]{6})$/i.exec(TC||'');
+      if(!m) return '#14151A'; const v=parseInt(m[1],16);
+      return (.299*((v>>16)&255)+.587*((v>>8)&255)+.114*(v&255))>140? '#14151A':'#FFFFFF'; })();
+    /* ── 배경 질감 (글자 뒤에 깔리는 것) ── */
+    if(fx==='tape'){
+      /* 테이프 — 기울인 색 띠에 톱니 찢김과 비닐 광택 */
+      const padX=fs*.42, padY=fs*.30;
+      const bx=tx-TW/2-padX, by=TY-fs*.92-padY*.4, bw=TW+padX*2, bh=fs*1.16+padY*.8;
+      g.save();
+      g.translate(tx,TY-fs*.35); g.rotate(-.032); g.translate(-tx,-(TY-fs*.35));
+      g.shadowColor='rgba(0,0,0,.5)'; g.shadowBlur=w*.008; g.shadowOffsetY=fs*.07;
+      g.fillStyle=TC;
+      const th=fs*.06, teeth=6;
+      g.beginPath(); g.moveTo(bx,by);
+      for(let k=1;k<=teeth;k++) g.lineTo(bx+(k%2?th:0), by+bh*k/teeth);
+      g.lineTo(bx+bw,by+bh);
+      for(let k=1;k<=teeth;k++) g.lineTo(bx+bw-(k%2?th:0), by+bh-bh*k/teeth);
+      g.closePath(); g.fill();
+      g.shadowBlur=0; g.shadowOffsetY=0;
+      g.save(); g.clip();
+      g.fillStyle='rgba(255,255,255,.20)'; g.fillRect(bx,by,bw,bh*.34);
+      g.fillStyle='rgba(0,0,0,.06)';
+      for(let k=1;k<=3;k++) g.fillRect(bx,by+bh*k/4,bw,Math.max(1,fs*.018));
+      g.restore();
+      g.restore();
+    }else if(fx==='sticker'){
+      /* 스티커 — 두꺼운 흰 테두리로 오려낸 느낌 */
+      g.save();
+      g.shadowColor='rgba(0,0,0,.45)'; g.shadowBlur=w*.008; g.shadowOffsetY=fs*.05;
+      g.lineJoin='round'; g.strokeStyle='#FFFFFF'; g.lineWidth=Math.max(3,fs*.20);
+      g.strokeText(TXT,tx,TY);
+      g.restore();
+    }
     /* 롱 섀도우 — 뒤로 길게 깔리는 입체 그림자 */
     if(fx==='longshadow'){
       g.save(); g.shadowBlur=0;
@@ -5835,16 +5888,21 @@ function drawTitle(title, idx, total, progress, tNow){
       }
       g.restore();
     }
-    /* 글로우 (0 없음 · 1 은은 · 2 강하게 · 3 네온) */
+    /* 글로우 (0 없음 · 1 은은 · 2 강하게 · 3 네온)
+       캔버스 그림자는 그리는 원본의 알파를 그대로 곱한다. 예전 코드는 글자를
+       알파 0.001로 깔아 「보이지 않는 글자가 그림자만 남기게」 하려 했는데,
+       그 탓에 그림자까지 0이 되어 글로우 단계가 전부 같은 그림이 됐다(실측 동일 픽셀).
+       글자를 불투명하게 깔고 그 위에 본문을 다시 그려 덮는 방식으로 바꾼다. */
     if(state.glow>=1){
       g.save();
-      const lv=[0,.34,.6,.95][state.glow]||0;
-      const rad=[0,.010,.018,.030][state.glow]||0;
-      g.fillStyle=hexA(TC,.001);
+      const lv=[0,.5,.8,1][state.glow]||0;
+      const rad=[0,.011,.020,.032][state.glow]||0;
+      g.fillStyle=TC;
       g.shadowColor=hexA(TC,lv); g.shadowBlur=w*rad;
-      for(let i=0;i<(state.glow>=3?3:state.glow===2?2:1);i++) g.fillText(TXT,tx,TY);
-      if(state.glow>=3){                       /* 네온: 흰 코어 + 컬러 헤일로 이중 */
-        g.shadowColor=hexA(TC,.8); g.shadowBlur=w*.055; g.fillText(TXT,tx,TY);
+      const passes=state.glow>=3?3:state.glow;
+      for(let i=0;i<passes;i++) g.fillText(TXT,tx,TY);
+      if(state.glow>=3){                       /* 네온: 넓게 퍼지는 컬러 헤일로 한 겹 더 */
+        g.shadowColor=hexA(TC,.85); g.shadowBlur=w*.062; g.fillText(TXT,tx,TY);
       }
       g.restore();
     }
@@ -5864,8 +5922,57 @@ function drawTitle(title, idx, total, progress, tNow){
       g.fillStyle=cg3;
     }else if(fx==='neonsign'){                  /* 네온 사인 — 흰 코어 */
       g.fillStyle='#ffffff';
+    }else if(fx==='steel'){                     /* 스틸 — 결이 있는 무광 금속 */
+      const sg2=g.createLinearGradient(0,TY-fs*.92,0,TY+fs*.22);
+      sg2.addColorStop(0,'#d9dee6'); sg2.addColorStop(.34,'#9aa3af');
+      sg2.addColorStop(.5,hexA(TC,.55)); sg2.addColorStop(.66,'#6f7885');
+      sg2.addColorStop(1,'#c3cad4');
+      g.fillStyle=sg2;
+    }else if(fx==='holo'){                      /* 홀로그램 — 무지개 사선 그라데이션 */
+      const hg=g.createLinearGradient(tx-TW/2,TY-fs,tx+TW/2,TY+fs*.2);
+      const sh=(R.T||0)*.06;
+      for(let k=0;k<=6;k++){
+        const p=k/6;
+        hg.addColorStop(p, `hsl(${((p+sh)*300+190)%360} 92% 68%)`);
+      }
+      g.fillStyle=hg;
+    }else if(fx==='tape'||fx==='sticker'){
+      g.fillStyle= fx==='tape'? tInk : TC;
     }else g.fillStyle=TC;
     g.fillText(TXT, tx, TY);
+    /* ── 글자 위에 얹는 질감 ── */
+    if(fx==='steel'){                           /* 브러시드 결 — 글자 모양 안에만 남긴다 */
+      texOnGlyphs(g,TXT,tx,TY,TW,fs,(tg,ox,oy,lw2,lh2)=>{
+        for(let k=0;k<26;k++){
+          const yy=oy-fs*.95+rand1(k*3.7)*fs*1.2;
+          tg.fillStyle= rand1(k*5.1)>.5? 'rgba(255,255,255,.30)':'rgba(0,0,0,.26)';
+          tg.fillRect(0, yy, lw2, Math.max(1,fs*.012));
+        }
+      });
+    }else if(fx==='spray'){                     /* 스프레이 — 가장자리로 튄 미세한 입자 */
+      g.save();
+      const N=140, bx=tx-TW/2-fs*.28, by=TY-fs*1.02, bw=TW+fs*.56, bh=fs*1.35;
+      for(let k=0;k<N;k++){
+        const px=bx+rand1(k*1.37)*bw, py=by+rand1(k*2.71)*bh;
+        const r2=fs*(.006+rand1(k*4.13)*.016);
+        g.fillStyle=hexA(TC,.10+.30*rand1(k*6.29));
+        g.beginPath(); g.arc(px,py,r2,0,Math.PI*2); g.fill();
+      }
+      g.restore();
+    }else if(fx==='riso'){                      /* 리소 그레인 — 어긋난 2색 + 거친 입자 */
+      g.save(); g.globalCompositeOperation='lighter';
+      g.globalAlpha=.5;
+      g.fillStyle='rgba(255,60,120,1)'; g.fillText(TXT,tx-fs*.035,TY-fs*.012);
+      g.fillStyle='rgba(40,190,255,1)'; g.fillText(TXT,tx+fs*.035,TY+fs*.012);
+      g.restore();
+      texOnGlyphs(g,TXT,tx,TY,TW,fs,(tg,ox,oy,lw2,lh2)=>{
+        for(let k=0;k<170;k++){
+          const px=ox-TW/2+rand1(k*1.91)*TW, py=oy-fs*.95+rand1(k*3.33)*fs*1.1;
+          tg.fillStyle=`rgba(0,0,0,${(.10+.26*rand1(k*7.7)).toFixed(3)})`;
+          tg.fillRect(px,py,Math.max(1,fs*.014),Math.max(1,fs*.014));
+        }
+      });
+    }
     if(fx==='chrome'){                          /* 상단 스펙큘러 */
       g.save(); g.globalCompositeOperation='lighter';
       g.fillStyle='rgba(255,255,255,.22)';
@@ -6580,6 +6687,31 @@ function drawLPTitle(g, cx, cy, R0, title, idx, total, darkText){
 }
 
 
+/* 글자 모양 안에만 질감을 얹는다.
+   캔버스에는 글자를 클립 패스로 쓰는 API가 없어서, 별도 레이어에 글자를 마스크로
+   깔고 source-in으로 질감을 찍은 뒤 통째로 합성한다. 사각형으로 클립하면 결이
+   배경까지 그어져 버린다(스틸에서 실제로 그랬다).
+   레이어 캔버스는 재사용하고 필요할 때만 키운다 — 프레임마다 만들면 비싸다. */
+let _texCv=null,_texG=null;
+function texOnGlyphs(g,TXT,tx,TY,TW,fs,paint){
+  const pad=fs*.6, lw=Math.ceil(TW+pad*2), lh=Math.ceil(fs*2.4);
+  if(lw<=0||lh<=0) return;
+  if(!_texCv){ _texCv=document.createElement('canvas'); _texG=_texCv.getContext('2d'); }
+  if(_texCv.width<lw||_texCv.height<lh){
+    _texCv.width=Math.max(_texCv.width,lw); _texCv.height=Math.max(_texCv.height,lh);
+  }
+  const tg=_texG;
+  tg.setTransform(1,0,0,1,0,0);
+  tg.globalCompositeOperation='source-over';
+  tg.clearRect(0,0,lw,lh);
+  tg.font=g.font; tg.textAlign='center'; tg.textBaseline=g.textBaseline;
+  const ox=lw/2, oy=fs*1.4;
+  tg.fillStyle='#fff'; tg.fillText(TXT,ox,oy);      /* 마스크 */
+  tg.globalCompositeOperation='source-in';
+  paint(tg,ox,oy,lw,lh);
+  tg.globalCompositeOperation='source-over';
+  g.drawImage(_texCv, 0,0,lw,lh, tx-ox, TY-oy, lw, lh);
+}
 /* 플레이리스트 제목/트랙번호/가사 */
 function drawPlaylistText(t){
   const tr=plTrack(); if(!tr) return;
@@ -8414,7 +8546,30 @@ $('fontRow').addEventListener('click',e=>{
   document.fonts.load(`${state.font.weight} 40px ${state.font.fam}`,'가나다 Ag01').then(drawNow);
   drawNow();
 });
-$('titleColor').addEventListener('input',e=>{ state.titleColor=e.target.value; drawNow(); });
+$('titleColor').addEventListener('input',e=>{ state.titleColor=e.target.value; drawNow(); syncTitleHue(); });
+/* 제목 색감 프리셋 — 질감마다 어울리는 색이 달라 한 번에 고를 수 있게 둔다 */
+const TITLE_HUES=[
+  ['아이보리','#FFF6E3'],['골드','#FFC44A'],['버터','#FFE785'],['라임','#C8FF4D'],
+  ['민트','#6FF2C8'],['시안','#4FD8FF'],['코발트','#5B8CFF'],['라벤더','#B69CFF'],
+  ['핫핑크','#FF5FA8'],['코랄','#FF7A5C'],['딥레드','#E0322F'],['차콜','#2B2F36']
+];
+(function buildTitleHues(){
+  const row=$('titleHueRow'); if(!row) return;
+  row.innerHTML=TITLE_HUES.map(([n,c])=>
+    `<button class="chip" data-hue="${c}" title="${n}"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c};margin-right:5px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(255,255,255,.25)"></span>${n}</button>`
+  ).join('');
+  row.addEventListener('click',e=>{
+    const b=e.target.closest('.chip'); if(!b) return;
+    state.titleColor=b.dataset.hue;
+    $('titleColor').value=b.dataset.hue;
+    syncTitleHue(); drawNow();
+  });
+})();
+function syncTitleHue(){
+  const row=$('titleHueRow'); if(!row) return;
+  const cur=(state.titleColor||'').toUpperCase();
+  [...row.children].forEach(c=>c.classList.toggle('on', c.dataset.hue.toUpperCase()===cur));
+}
 $('waveColor').addEventListener('input',e=>{ state.waveColor=e.target.value; drawNow(); });
 const PALETTES=[
   ['퓨어 화이트','#FFFFFF','#FFFFFF'], ['실버','#E9EDF3','#C6CFDA'], ['문라이트','#DFE6F0','#A8B6CC'],
@@ -8660,7 +8815,8 @@ async function startExport(){
      PC는 quality가 2배 빠르기도 함). 추측 대신 실제로 몇 프레임 돌려보고 제일 빠른 설정을 고른다. */
   setStatus('<span class="rec">⚡</span> 인코더 설정 확인 중…');
   await yieldTask();
-  const pick=await probeEncoder(baseCfg, W, H, FPS);
+  const QMAX=(W*H>=3840*2160)?6 : (W*H>=1920*1080?24:40);
+  const pick=await probeEncoder(baseCfg, W, H, FPS, QMAX);
   if(!pick){ offerRealtime('이 해상도의 H.264 인코딩을 지원하지 않습니다.'); return; }
   const vCfg=pick.cfg;
   encoderPickNote=pick.note;
@@ -8737,7 +8893,7 @@ async function startExport(){
     pauseAllVideos();
     const totalFrames=Math.ceil(outDur*FPS);
     const hasVideoClips=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
-    const QMAX=(W*H>=3840*2160)?6 : (W*H>=1920*1080?24:40);
+    /* QMAX는 위에서 인코더 프로브와 같은 값으로 이미 정했다 */
 
     /* ── 구간별 믹싱+인코딩 (출력 0~outDur, 타임라인은 exStart 오프셋) ── */
     const SEG=45, pad=fftN/48000;                        /* 45초 구간 + FFT 창 여유 */
@@ -8958,6 +9114,7 @@ function syncUIFromState(){
   pick('fontRow',c=>+c.dataset.f===FONTS.indexOf(state.font));
   pick('tplRow',c=>c.dataset.tp===(state.template||'none'));
   pick('titleFxRow',c=>c.dataset.tfx===(state.titleFx||'none'));
+  syncTitleHue();
   $('lpOpts').style.display=state.template==='lp'?'':'none';
   $('lpHint').style.display=state.template==='lp'?'':'none';
   $('lpArmBtn').classList.toggle('on',!!state.lpTonearm);
