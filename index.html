@@ -190,12 +190,19 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #tlSel .selHL{left:-8px}
 #tlSel .selHR{right:-8px}
 #tlSel .selH::after{content:'';position:absolute;top:36%;bottom:36%;width:4px;left:5px;border-radius:2px;background:#6cc6ff;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
-#shList .shrow{display:flex;gap:6px;align-items:center;padding:7px 8px;border:1px solid var(--line);border-radius:9px;margin-top:6px;background:rgba(255,255,255,.02)}
-#shList .shrow .n{font-size:11px;color:var(--dim);width:20px;flex:0 0 20px}
-#shList .shrow .ti{flex:1;min-width:0;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#shList .shrow input{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:5px 7px;font-family:inherit;font-size:11.5px;min-width:0}
-#shList .shrow .hk{flex:1.4}
-#shList .shrow .tm{width:64px;text-align:center}
+/* 한 줄에 다 밀어 넣으면 후킹 문구·시각이 좁아서 안 보였다 → 제목 줄 / 입력 줄로 분리 */
+#shList .shrow{display:grid;grid-template-columns:22px 1fr auto;gap:5px 7px;align-items:center;
+  padding:9px 10px;border:1px solid var(--line);border-radius:10px;margin-top:7px;background:rgba(255,255,255,.02)}
+#shList .shrow .n{font-size:11px;color:var(--dim);grid-row:1}
+#shList .shrow .ti{min-width:0;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#shList .shrow .acts{display:flex;gap:2px}
+#shList .shrow .fields{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+#shList .shrow .hkw{flex:1 0 100%}          /* 후킹 문구는 한 줄 전체를 쓴다 */
+#shList .shrow input{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+  border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;min-width:0}
+#shList .shrow .hk{flex:1;font-weight:600}
+#shList .shrow .tm,#shList .shrow .dl{width:62px;text-align:center;font-variant-numeric:tabular-nums}
+#shList .shrow .fl{font-size:10.5px;color:var(--dim);flex:0 0 auto}
 #shList .shrow button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;padding:3px 5px}
 #shList .shrow.done{border-color:#3f7d55}
 #shList .shrow.cur{border-color:var(--amber)}
@@ -751,7 +758,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="grp open"><div class="grp-h">쇼츠 공장 — 자동 추출 · 일괄 내보내기<span class="chev">▾</span></div><div class="grp-b">
       <div class="row" style="gap:12px;align-items:center">
         <label style="font-size:12px;color:var(--dim)">길이
-          <input type="number" class="snum" id="shLen" min="10" max="60" step="5" value="30" style="width:56px"><small class="usuf">초</small></label>
+          <input type="number" class="snum" id="shLen" min="5" max="180" step="5" value="30" style="width:56px"><small class="usuf">초</small></label>
         <label style="font-size:12px;color:var(--dim)">페이드
           <input type="number" class="snum" id="shFade" min="0" max="3" step="0.5" value="0.5" style="width:52px"><small class="usuf">초</small></label>
       </div>
@@ -762,7 +769,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       <div id="shList"></div>
       <div class="empty-note" id="shEmpty">아직 목록이 없습니다 — 「하이라이트 자동 추출」로 곡마다 후렴을 찾아 담거나,<br>타임라인에서 원하는 지점을 클릭하고 「현재 위치로 추가」를 누르세요</div>
-      <div class="hint2">각 줄의 <b>⤓</b> 는 재생 헤드 위치를 그 항목의 시작점으로 바꿉니다. 시각을 직접 입력해도 됩니다.</div>
+      <div class="hint2">위의 <b>길이</b>는 새로 담는 항목의 기본값(30초)이고, <b>줄마다 길이를 따로</b> 정할 수 있습니다. <b>⤓</b> 는 재생 헤드 위치를 그 항목의 시작점으로 바꿉니다.</div>
       <div class="row" style="margin-top:10px">
         <button class="chip" id="shExportAll" style="border-color:var(--amber);color:var(--amber)">⚡ 목록 전부 내보내기</button>
         <button class="chip" id="shStop" style="display:none">중지</button>
@@ -6833,11 +6840,14 @@ function drawOverlays(t){
         const gap=fs*.16;
         let totH=0; sizes.forEach(fz=>totH+=fz*1.18); totH+=gap*(lines.length-1);
         const padY=fs*.46;
-        /* 검은 띠는 가로 전체 + 가까운 가장자리에 딱 붙고, 높이는 글자에 맞춰 최소로 */
+        /* 검은 띠는 가로 전체 + 가까운 가장자리에 딱 붙지만, 글자는 안전 여백만큼
+           안쪽으로 들여 놓는다. 휴대폰 쇼츠는 위에 앱 UI·노치가, 아래에 제목·버튼이
+           겹쳐서 화면 끝에 붙은 글자가 잘려 보였다. 띠 자체는 끝까지 채워 인상은 유지. */
+        const SAFE_T=h*.085, SAFE_B=h*.13;
         const bandH=totH+padY*2;
-        let bandTop, bandBot;
-        if(c.tx.y<=.5){ bandTop=0; bandBot=bandH; }
-        else { bandBot=h; bandTop=h-bandH; }
+        let bandTop, bandBot, textTop;
+        if(c.tx.y<=.5){ bandTop=0; bandBot=SAFE_T+bandH; textTop=SAFE_T; }
+        else { bandBot=h; bandTop=h-(SAFE_B+bandH); textTop=bandTop; }
         g.save(); g.shadowBlur=0; g.shadowOffsetY=0;
         g.fillStyle=c.oband||'#000000';
         g.fillRect(0, bandTop, w, bandBot-bandTop);
@@ -6848,7 +6858,7 @@ function drawOverlays(t){
           else g.fillRect(0, 0, w, bh2);
         }
         g.restore();
-        let cy=bandTop+padY;
+        let cy=textTop+padY;
         lines.forEach((L,i)=>{ const fz=sizes[i]; setF(fz); cy+=fz*.94;
           g.fillStyle=(i===0? col : (c.oink2||'#FFFFFF'));
           g.fillText(L, x, cy);
@@ -7996,6 +8006,8 @@ const HK_STYLES=[['banner','썸네일 배너'],['pop','팝아웃'],['neon','네�
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
 const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true, band2:true};
+/* 후킹 문구 세로 위치 — 휴대폰 쇼츠 상단은 앱 UI·노치가 덮어서 0.16은 잘려 보였다 */
+const HOOK_Y=0.24;
 function hookExtra(){ return {ohook:true, ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
   ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:hookSty.sub, oband:'#000000', oband2:hookSty.band2,
   ostyle:hookSty.style, oanim:hookSty.anim}; }
@@ -8112,7 +8124,7 @@ function addHookOverlay(text, atT, dur){
     } else len=3;
   }
   const clip=newClip(null, start, len, Object.assign({otext:txt}, hookExtra()));
-  clip.tx.y=0.16;                       /* 쇼츠 상단 안전영역 */
+  clip.tx.y=HOOK_Y;                     /* 휴대폰 상단 UI에 가리지 않는 위치 */
   T2.clips.push(clip);
   renderAll();
   setStatus(`후킹 문구 추가: “${txt}”`);
@@ -8256,6 +8268,11 @@ function findHighlight(c, want, fromT){
   /* 누적합으로 창 평균·플럭스 밀도를 O(n)에 */
   const cr=new Float64Array(n+1), cf=new Float64Array(n+1);
   for(let i=0;i<n;i++){ cr[i+1]=cr[i]+rms[i]; cf[i+1]=cf[i]+flux[i]; }
+  /* 후렴(훅)은 '앞 구간보다 확 올라오는' 지점이다. 평균 세기만 보면 곡에서 제일 시끄러운
+     아무 데나 잡히므로, 직전 8초 대비 상승폭(lift)과 곡 전체 평균 대비 초과분을 같이 본다.
+     또 후렴은 대개 곡 중후반에 있어 그 구간에 약한 가점을 준다. */
+  const LIFT=Math.max(1,Math.round(8/HL_HOP));
+  const songMean=cr[n]/n/peak;
   let best=0, bestScore=-1e9;
   for(let i=0;i+W<=n;i++){
     const mean=(cr[i+W]-cr[i])/W/peak;
@@ -8263,9 +8280,14 @@ function findHighlight(c, want, fromT){
     /* 꾸준함: 창 안에서 조용한 지점이 적을수록 높음 */
     let low=0; for(let k=i;k<i+W;k++) if(rms[k]<peak*.35) low++;
     const steady=1-low/W;
-    const pos=i/(n-W);                      /* 0=곡 앞, 1=곡 끝 */
+    const p0=Math.max(0,i-LIFT);
+    const before=i>p0? (cr[i]-cr[p0])/(i-p0)/peak : mean;
+    const lift=clamp(mean-before,0,1);           /* 직전 구간 대비 상승 */
+    const over=clamp(mean-songMean,0,1);         /* 곡 평균 대비 초과 */
+    const pos=i/Math.max(1,n-W);                 /* 0=곡 앞, 1=곡 끝 */
     const edge=(pos<.12? -(0.12-pos)*2.2 : 0) + (pos>.88? -(pos-.88)*1.6 : 0);
-    const sc=mean*1.0 + steady*0.75 + fl*0.5 + edge;
+    const mid=(pos>=.3&&pos<=.75)? .12 : 0;      /* 후렴이 잘 나오는 구간 */
+    const sc=mean*0.8 + steady*0.6 + fl*0.4 + lift*1.5 + over*1.1 + mid + edge;
     if(sc>bestScore){ bestScore=sc; best=i; }
   }
   /* 시작점을 바로 앞 온셋(가장 큰 flux)으로 당겨 붙임 — 최대 2초 */
@@ -8289,20 +8311,32 @@ function renderShortsList(){
     const row=document.createElement('div'); row.className='shrow'+(it.done?' done':'')+(it.cur?' cur':'');
     row.innerHTML=`<span class="n">${String(i+1).padStart(2,'0')}</span>
       <span class="ti"></span>
-      <input class="hk" placeholder="후킹 문구">
-      <input class="tm" title="시작 시각">
-      <button class="here" title="재생 헤드 위치를 시작점으로">⤓</button>
-      <button class="rm" title="빼기">✕</button>`;
+      <span class="acts">
+        <button class="here" title="재생 헤드 위치를 시작점으로">⤓</button>
+        <button class="rm" title="빼기">✕</button></span>
+      <span class="fields">
+        <span class="hkw"><input class="hk" placeholder="후킹 문구" style="width:100%"></span>
+        <span class="fl">시작</span><input class="tm" title="시작 시각">
+        <span class="fl">길이</span><input class="dl" type="number" min="5" max="180" step="1" title="이 곡의 길이(초)">
+        <small class="fl" style="margin-left:auto">초</small>
+      </span>`;
     row.querySelector('.ti').textContent=it.title;
     const hk=row.querySelector('.hk'); hk.value=it.hook||'';
     hk.addEventListener('input',()=>it.hook=hk.value);
+    const maxDurOf=()=>{ const c=plClips().find(x=>x.id===it.clipId);
+      return (c? clipEnd(c) : tlDuration())-it.start; };
     const tm=row.querySelector('.tm'); tm.value=fmtT(it.start);
+    const dl=row.querySelector('.dl'); dl.value=Math.round(it.dur);
     tm.addEventListener('change',()=>{ const v=parseT(tm.value);
-      if(!isNaN(v)) it.start=clamp(v,0,Math.max(0,tlDuration()-1)); tm.value=fmtT(it.start); });
+      if(!isNaN(v)) it.start=clamp(v,0,Math.max(0,tlDuration()-1));
+      tm.value=fmtT(it.start);
+      it.dur=clamp(it.dur,3,Math.max(3,maxDurOf())); dl.value=Math.round(it.dur); });
+    dl.addEventListener('change',()=>{                 /* 곡마다 길이를 따로 정할 수 있다 */
+      const v=+dl.value; if(!isNaN(v)) it.dur=clamp(v,3,Math.max(3,maxDurOf()));
+      dl.value=Math.round(it.dur); });
     row.querySelector('.here').onclick=()=>{
-      const c=plClips().find(x=>x.id===it.clipId);
       it.start=+clamp(state.time,0,Math.max(0,tlDuration()-1)).toFixed(2);
-      it.dur=(c? Math.min(clipEnd(c)-it.start, tlDuration()-it.start) : tlDuration()-it.start);
+      it.dur=clamp(it.dur, 3, Math.max(3, maxDurOf()));   /* 길이는 사용자가 정한 값 유지 */
       renderShortsList();
       setStatus(`${i+1}번 시작점을 ${fmtT(it.start)} 로 옮겼습니다.`); };
     row.querySelector('.rm').onclick=()=>{ shortsQueue.splice(i,1); renderShortsList(); };
@@ -8313,7 +8347,7 @@ function renderShortsList(){
 $('shBuild').onclick=()=>{
   const cs=plClips().filter(c=>c.assetId&&A(c.assetId));
   if(!cs.length){ setStatus('플레이리스트에 곡이 없습니다.'); return; }
-  const want=clamp(+$('shLen').value||30,10,60);
+  const want=clamp(+$('shLen').value||30,5,180);   /* 새 항목의 기본 길이 */
   const pool=hookPool();
   shortsQueue=cs.map((c,i)=>{
     const a=A(c.assetId);
@@ -8327,7 +8361,7 @@ $('shBuild').onclick=()=>{
 };
 $('shAddHere').onclick=()=>{
   const t=state.time, c=clipAt(t);
-  const want=clamp(+$('shLen').value||30,10,60);
+  const want=clamp(+$('shLen').value||30,5,180);   /* 새 항목의 기본 길이 */
   const a=c?A(c.assetId):null, title=c?(c.title||(a?a.name:'')):'';
   const lim=c? clipEnd(c) : tlDuration();
   const dur=Math.min(want, lim-t);
@@ -8349,7 +8383,7 @@ $('shExportAll').onclick=async()=>{
   $('shStop').style.display=''; $('shExportAll').disabled=true;
   const T2=state.tracks.find(t=>t.kind==='over');
   const fadeS=clamp(+$('shFade').value||0, 0, 3);
-  const want=clamp(+$('shLen').value||30,10,60);
+  const want=clamp(+$('shLen').value||30,5,180);   /* 새 항목의 기본 길이 */
   const savedRange={start:exp.start,end:exp.end,fi:exp.fadeIn,fo:exp.fadeOut};
   const dateTag=new Date().toISOString().slice(0,10);
   let okCount=0;
@@ -8361,15 +8395,15 @@ $('shExportAll').onclick=async()=>{
     $('shProg').innerHTML=`<b style="color:var(--amber)">${i+1}/${shortsQueue.length}</b> — “${it.hook||it.title}” 인코딩 중…`;
     /* 후킹 오버레이 삽입 */
     let hookClip=null;
+    const segLen=Math.max(3, it.dur||want);        /* 길이는 줄마다 정한 값을 그대로 쓴다 */
     if(it.hook){
-      const segLen=Math.min(want, it.dur);
       hookClip=newClip(null, it.start+0.15,
-        hookSty.hold? Math.max(1, segLen-0.15) : Math.min(3.2, it.dur-0.3),
+        hookSty.hold? Math.max(1, segLen-0.15) : Math.min(3.2, segLen-0.3),
         Object.assign({otext:it.hook}, hookExtra()));
-      hookClip.tx.y=0.16;
+      hookClip.tx.y=HOOK_Y;
       T2.clips.push(hookClip);
     }
-    exp.start=it.start; exp.end=Math.min(tlDuration(), it.start+Math.min(want,it.dur));
+    exp.start=it.start; exp.end=Math.min(tlDuration(), it.start+segLen);
     exp.fadeIn=fadeS; exp.fadeOut=fadeS;
     const safe=(it.title||'short').replace(/[^\p{L}\p{N}\s._-]/gu,'').trim().slice(0,40)||'short';
     exportNameOverride=`shorts_${String(i+1).padStart(2,'0')}_${safe}_${dateTag}.mp4`;
