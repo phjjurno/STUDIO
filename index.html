@@ -198,11 +198,12 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #shList .shrow .acts{display:flex;gap:2px}
 #shList .shrow .fields{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 #shList .shrow .hkw{flex:1 0 100%}          /* 후킹 문구는 한 줄 전체를 쓴다 */
-#shList .shrow input{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+#shList .shrow input{background:var(--panel2);border:1px solid var(--line);color:#FFFFFF;
   border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;min-width:0}
 #shList .shrow .hk{flex:1;font-weight:600}
 #shList .shrow .tm,#shList .shrow .dl{width:62px;text-align:center;font-variant-numeric:tabular-nums}
 #shList .shrow .fl{font-size:10.5px;color:var(--dim);flex:0 0 auto}
+#shList .shrow input::placeholder{color:var(--dim)}
 #shList .shrow button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;padding:3px 5px}
 #shList .shrow.done{border-color:#3f7d55}
 #shList .shrow.cur{border-color:var(--amber)}
@@ -213,8 +214,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .hkrow .hk-item{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hkrow .mini{background:none;border:1px solid var(--line);border-radius:8px;color:var(--dim);
   cursor:pointer;font-size:12px;padding:0 8px;flex:0 0 auto}
-.hkrow .mini:hover{color:var(--ink);border-color:var(--amber)}
-.hkedit{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--amber);color:var(--ink);
+.hkrow .mini:hover{color:var(--amber);border-color:var(--amber)}
+.hkedit{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--amber);color:#FFFFFF;
   border-radius:9px;padding:7px 10px;font-family:inherit;font-size:12.5px}
 .shprev{margin-top:8px;height:62px;border:1px solid var(--line);border-radius:10px;
   background:linear-gradient(135deg,#12151c,#1b2030);display:flex;align-items:center;justify-content:center;overflow:hidden}
