@@ -543,6 +543,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-wv="foil">🥇 골드 포일</button>
         <button class="chip" data-wv="charcoal">⚫ 차콜</button>
         <button class="chip" data-wv="watercolor">💦 수채화</button>
+        <button class="chip" data-wv="ticks">│ 틱 게이지</button>
+        <button class="chip" data-wv="lens">◇ 코어 렌즈</button>
+        <button class="chip" data-wv="stack">▤ 스텝 스택</button>
+        <button class="chip" data-wv="edge">◜ 엣지 라인</button>
+        <button class="chip" data-wv="lyricwave">🅰 가사 파형</button>
       </div>
       <div class="sliders">
         <div class="slider"><label>파형 가로 위치 <span class="slider-rhs"><b id="waveXV" style="display:none">50%</b><input type="number" class="snum" id="waveXN" min="5" max="95" value="50"><small class="usuf">%</small></span></label>
@@ -553,6 +558,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <input type="range" id="waveSW" min="30" max="220" value="100"></div>
         <div class="slider"><label>파형 세로 크기 <span class="slider-rhs"><b id="waveSHV" style="display:none">100%</b><input type="number" class="snum" id="waveSHN" min="30" max="220" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="waveSH" min="30" max="220" value="100"></div>
+        <div class="slider"><label>다이내믹 <small style="color:var(--dim)">(최고·최저 차이)</small> <span class="slider-rhs"><b id="waveDynV" style="display:none">45%</b><input type="number" class="snum" id="waveDynN" min="0" max="100" value="45"><small class="usuf">%</small></span></label>
+          <input type="range" id="waveDyn" min="0" max="100" value="45"></div>
         <div class="slider"><label>패널·종이 투명도 <small style="color:var(--dim)">(VU·스코프·질감)</small> <span class="slider-rhs"><b id="wavePanelV" style="display:none">100%</b><input type="number" class="snum" id="wavePanelN" min="0" max="100" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="wavePanel" min="0" max="100" value="100"></div>
       </div>
@@ -2865,7 +2872,7 @@ const state = {
        lp:{x:.5,y:.5,scale:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
-  waveColor:'#FFFFFF', titleColor:'#FFFFFF',
+  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45,
   glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
@@ -3966,8 +3973,17 @@ function getAmp(i,N,live){
   }else{
     t=.16+.1*Math.sin(i*.42+R.T*1.18)+.05*Math.sin(i*.93+R.T*3.1);
   }
+  /* 다이내믹 — 조용한 구간을 더 눌러 최고·최저 차이를 벌린다.
+     floor 아래는 0으로 깎고 남은 구간을 감마로 휘어 준 뒤 다시 위로 늘린다. */
+  const D=state.waveDyn ?? .45;
+  if(D>0.001){
+    const floor=.26*D, gamma=1+1.7*D;
+    t=Math.pow(clamp((t-floor)/(1-floor),0,1), gamma)*(1+.42*D);
+    t=Math.min(1,t);
+  }
   const cur=smoothVals[i];
-  smoothVals[i]=cur+(t-cur)*(t>cur? .5 : .09);
+  /* 세게 걸수록 붙었다 빨리 떨어지게 — 타격이 또렷해진다 */
+  smoothVals[i]=cur+(t-cur)*(t>cur? .5+.35*D : .09+.14*D);
   return smoothVals[i];
 }
 /* ───────── 비트(킥) 검출 — 리듬에 반응하는 파형용 ───────── */
@@ -5805,6 +5821,130 @@ function drawWave(live){
       g.restore();
     }
     box=[xs, CY-maxH*1.25, span, maxH*2.5];
+
+  }else if(state.wave==='ticks'){
+    /* 틱 게이지 — 가는 세로선 하나씩. 낮으면 거의 안 보이고 높을 때만 확 서서
+       최고·최저 차이가 그대로 눈에 들어온다. */
+    const N=72, span=w*.84*SW, unit=span/N, xs=CX-span/2;
+    const maxH=h*.20*SH, lw=Math.max(1.2, unit*.16);
+    g.lineCap='butt'; g.lineWidth=lw;
+    if(glowA){ g.shadowColor=hexA(C,glowA*.8); g.shadowBlur=glowB*.7; }
+    for(let i=0;i<N;i++){
+      const v=getAmp(i,N,live);
+      const x=xs+i*unit+unit*.5;
+      const hgt=Math.max(lw, v*maxH);
+      g.strokeStyle=hexA(C, .10+.90*v);
+      g.beginPath(); g.moveTo(x, CY); g.lineTo(x, CY-hgt); g.stroke();
+    }
+    g.shadowBlur=0;
+    g.strokeStyle=hexA(C,.22); g.lineWidth=Math.max(1, m*.0012);
+    g.beginPath(); g.moveTo(xs, CY+lw); g.lineTo(xs+span, CY+lw); g.stroke();
+    box=[xs, CY-maxH, span, maxH];
+
+  }else if(state.wave==='lens'){
+    /* 코어 렌즈 — 한 줄짜리 선의 두께만 소리에 따라 부풀린다. 아주 미니멀. */
+    const N=90, span=w*.80*SW, unit=span/N, xs=CX-span/2;
+    const maxT=h*.085*SH, minT=Math.max(1.2, m*.0016);
+    const env=i=>Math.pow(Math.sin(Math.PI*i/(N-1)), .7);   /* 양끝을 뾰족하게 */
+    const TH=[];
+    for(let i=0;i<N;i++) TH[i]=minT+getAmp(i,N,live)*maxT*env(i);
+    if(glowA){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB; }
+    const gr=g.createLinearGradient(xs,0,xs+span,0);
+    gr.addColorStop(0,hexA(C,.15)); gr.addColorStop(.5,hexA(C,.95)); gr.addColorStop(1,hexA(C,.15));
+    g.fillStyle=gr;
+    g.beginPath();
+    for(let i=0;i<N;i++){ const x=xs+i*unit; i?g.lineTo(x,CY-TH[i]):g.moveTo(x,CY-TH[i]); }
+    for(let i=N-1;i>=0;i--) g.lineTo(xs+i*unit, CY+TH[i]);
+    g.closePath(); g.fill();
+    g.shadowBlur=0;
+    box=[xs, CY-maxT, span, maxT*2];
+
+  }else if(state.wave==='stack'){
+    /* 스텝 스택 — 높이를 계단으로 끊어 그린 블록. 그래픽하게 딱 떨어지는 느낌. */
+    const N=30, STEPS=9, span=w*.82*SW, unit=span/N, xs=CX-span/2;
+    const bw=unit*.72, maxH=h*.22*SH, sh=maxH/STEPS, gap=Math.max(1.5, sh*.22);
+    for(let i=0;i<N;i++){
+      const v=getAmp(i,N,live);
+      const lit=Math.max(1, Math.round(v*STEPS));
+      const x=xs+i*unit+(unit-bw)/2;
+      for(let j=0;j<STEPS;j++){
+        const on=j<lit;
+        const y=CY-(j+1)*sh;
+        g.fillStyle=hexA(C, on? (.42+.58*(j/(STEPS-1))) : .05);
+        if(on && glowA && j>=lit-1){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB*.6; }
+        else g.shadowBlur=0;
+        g.fillRect(x, y+gap/2, bw, sh-gap);
+      }
+    }
+    g.shadowBlur=0;
+    box=[xs, CY-maxH, span, maxH];
+
+  }else if(state.wave==='edge'){
+    /* 엣지 라인 — 위쪽 한 줄 실루엣과 그 아래 옅은 면. 편집 디자인 같은 정갈함. */
+    const N=100, span=w*.88*SW, unit=span/N, xs=CX-span/2;
+    const maxH=h*.20*SH;
+    const YS=[];
+    for(let i=0;i<N;i++){
+      const env=.35+.65*Math.pow(Math.sin(Math.PI*i/(N-1)),.8);
+      YS[i]=CY-getAmp(i,N,live)*maxH*env;
+    }
+    const path=()=>{ g.beginPath();
+      g.moveTo(xs, YS[0]);
+      for(let i=1;i<N;i++){ const x0=xs+(i-1)*unit, x1=xs+i*unit;
+        g.bezierCurveTo(x0+unit*.5, YS[i-1], x1-unit*.5, YS[i], x1, YS[i]); } };
+    const fg=g.createLinearGradient(0,CY-maxH,0,CY);
+    fg.addColorStop(0,hexA(C,.26)); fg.addColorStop(1,hexA(C,0));
+    path(); g.lineTo(xs+(N-1)*unit, CY); g.lineTo(xs, CY); g.closePath();
+    g.fillStyle=fg; g.fill();
+    if(glowA){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB; }
+    g.strokeStyle=hexA(C,.96); g.lineWidth=Math.max(1.4, m*.0022); g.lineJoin='round';
+    path(); g.stroke();
+    g.shadowBlur=0;
+    box=[xs, CY-maxH, span, maxH];
+
+  }else if(state.wave==='lyricwave'){
+    /* 가사 파형 — 지금 나오는 자막 글자가 그대로 파형이 된다.
+       글자마다 자기 자리의 주파수를 받아 위아래로 튀고 크기·진하기가 달라진다. */
+    const tAbs=(R.t!=null? R.t : T);
+    let TXT='';
+    try{ const sc=activeSub(tAbs); if(sc&&(sc.text||'').trim()) TXT=sc.text.split('\n')[0].trim(); }catch(e){}
+    if(!TXT){                                   /* 자막이 없으면 지금 곡 제목으로 */
+      try{ for(const c of plClips()) if(tAbs>=c.start-.001&&tAbs<clipEnd(c)){
+        const a=A(c.assetId); TXT=(c.title||(a?a.name:'')||'').trim(); break; } }catch(e){}
+    }
+    if(!TXT) TXT='PULSEORIGN';
+    const chars=Array.from(TXT).filter(ch=>ch!=='\n');
+    const N=Math.max(1,chars.length);
+    const F=state.font||FONTS[0];
+    const span=w*.86*SW;
+    let fs=Math.round(w*.052*SH*(F.mul||1));
+    g.textAlign='center'; g.textBaseline='middle';
+    const fit=fz=>{ g.font=`${F.weight} ${fz}px ${F.fam},'Noto Sans KR',sans-serif`;
+      let tw=0; for(const ch of chars) tw+=g.measureText(ch).width+fz*.06; return tw; };
+    let tw=fit(fs);
+    while(tw>span && fs>10){ fs=Math.round(fs*.92); tw=fit(fs); }
+    const maxH=h*.085*SH;
+    if(glowA){ g.shadowColor=hexA(C,glowA); g.shadowBlur=glowB*.9; }
+    /* 글자마다 제 자리의 주파수를 받되, 곡 전체 세기도 절반쯤 섞는다.
+       주파수만 쓰면 뒷 글자(고역)가 늘 작게 눌려 문장이 오른쪽으로 사그라든다. */
+    const V=new Array(N); let sum=0;
+    for(let i=0;i<N;i++){ V[i]=getAmp(i,N,live); sum+=V[i]; }
+    const avg=sum/N;
+    for(let i=0;i<N;i++) V[i]=Math.min(1, V[i]*.72+avg*.62);
+    let x=CX-tw/2;
+    for(let i=0;i<N;i++){
+      const ch=chars[i];
+      const v=V[i];
+      const cw=g.measureText(ch).width;
+      const fz=Math.round(fs*(.72+.62*v));
+      g.font=`${F.weight} ${fz}px ${F.fam},'Noto Sans KR',sans-serif`;
+      g.fillStyle=hexA(C, .28+.72*v);
+      g.fillText(ch, x+cw/2, CY - v*maxH);
+      x+=cw+fs*.06;
+      g.font=`${F.weight} ${fs}px ${F.fam},'Noto Sans KR',sans-serif`;
+    }
+    g.shadowBlur=0;
+    box=[CX-tw/2, CY-maxH-fs*.8, tw, maxH*2+fs*1.6];
   }
   g.restore();
   if(R.preview&&box) HIT.push({id:'wave', x:box[0], y:box[1], w:box[2], h:box[3]});
@@ -6352,7 +6492,7 @@ function drawNow(){
 function drawFrame(t, live, g, w, h, isPreview, wallT){
   g=g||pctx; w=w||canvas.width; h=h||canvas.height;
   isPreview=(isPreview===undefined)? (g===pctx) : isPreview;
-  R={g,w,h,preview:isPreview,T:(wallT!==undefined? wallT:t),live};
+  R={g,w,h,preview:isPreview,T:(wallT!==undefined? wallT:t),t,live};
   HIT=[];
   drawBackground();
   const vts=state.tracks.filter(tr=>tr.kind==='video').reverse(); /* 아래 트랙부터 */
@@ -9021,6 +9161,7 @@ bindSlider('waveX','waveXV',v=>state.el.wave.x=v/100);
 bindSlider('waveY','waveYV',v=>state.el.wave.y=v/100);
 bindSlider('waveSW','waveSWV',v=>state.el.wave.sw=v/100);
 bindSlider('waveSH','waveSHV',v=>state.el.wave.sh=v/100);
+bindSlider('waveDyn','waveDynV',v=>state.waveDyn=v/100);
 bindSlider('wavePanel','wavePanelV',v=>state.el.wave.panel=v/100);
 bindSlider('titleSize','titleSizeV',v=>state.titleScale=v/100);
 /* 진행 바 슬라이더 */
@@ -9109,7 +9250,7 @@ $('waveRow').addEventListener('click',e=>{
   const b=e.target.closest('.chip'); if(!b) return;
   [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
   state.wave=b.dataset.wv;
-  const defs={circle:.5, radial:.5, orbit2:.5, scope:.56, mirror:.6, strings:.6, reflect:.6, flow:.6, ribbon:.64, vu:.66, dots:.72, arc:.72, bars:.74, peaks:.74, steel:.74, wf:.62, pencil:.62, colorpencil:.62, graffiti:.62, ink:.62, foil:.62, charcoal:.62, watercolor:.62, spectrum:.78, skyline:.78};
+  const defs={circle:.5, radial:.5, orbit2:.5, scope:.56, mirror:.6, strings:.6, reflect:.6, flow:.6, ribbon:.64, vu:.66, dots:.72, arc:.72, bars:.74, peaks:.74, steel:.74, wf:.62, pencil:.62, colorpencil:.62, graffiti:.62, ink:.62, foil:.62, charcoal:.62, watercolor:.62, spectrum:.78, skyline:.78, ticks:.72, lens:.6, stack:.76, edge:.72, lyricwave:.62};
   if(state.wave!=='off'){
     state.el.wave.y = defs[state.wave] ?? .74;
     state.el.wave.x = .5;
@@ -9767,6 +9908,7 @@ function syncUIFromState(){
   setS('waveY','waveYV',Math.round(state.el.wave.y*100));
   setS('waveSW','waveSWV',Math.round(state.el.wave.sw*100));
   setS('waveSH','waveSHV',Math.round(state.el.wave.sh*100));
+  setS('waveDyn','waveDynV',Math.round((state.waveDyn??.45)*100));
   setS('wavePanel','wavePanelV',Math.round((state.el.wave.panel!=null?state.el.wave.panel:1)*100));
   setS('lpScale','lpScaleV',Math.round((state.el.lp?state.el.lp.scale||1:1)*100));
   setS('lpX','lpXV',Math.round((state.el.lp&&state.el.lp.x!=null?state.el.lp.x:.5)*100));
