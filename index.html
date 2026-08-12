@@ -904,6 +904,17 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <label style="font-size:12px;color:var(--dim)">아웃 <input type="number" class="snum" id="expFadeOut" min="0" max="15" step="0.5" value="0" style="width:52px"></label>
     <span style="font-size:11px;color:var(--dim)">화면·소리 함께 페이드</span>
   </div>
+  <div class="opt-label">루프 반복</div>
+  <div class="row" style="gap:8px;align-items:center">
+    <div class="stepper">
+      <button class="chip st" id="expLoopDn">−</button>
+      <input type="number" class="snum" id="expLoop" min="1" max="60" step="1" value="1" style="width:50px">
+      <button class="chip st" id="expLoopUp">＋</button>
+    </div>
+    <span style="font-size:11px;color:var(--dim)" id="expLoopNote">1회 — 반복 없음</span>
+  </div>
+  <div class="hint2" style="margin-top:4px">한 번만 인코딩하고 그 결과를 이어 붙입니다 —
+    인코딩 시간은 <b>1회분</b>만 걸리고 파일 크기만 배수로 늘어납니다.</div>
   <div class="est" id="expEst"></div>
   <div class="actions">
     <button id="expClose">닫기</button>
@@ -2937,6 +2948,10 @@ let _uid=0;
 const uid=()=>'c'+(Date.now().toString(36))+(_uid++).toString(36);
 const cleanTitle = fn => fn.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
 const fmt = s => { s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+/* 1시간이 넘으면 h:mm:ss 로 — 루프로 5시간짜리를 만들 때 300:00 처럼 보이지 않게 */
+const fmtH = s => { s=Math.max(0,Math.round(s));
+  if(s<3600) return fmt(s);
+  return Math.floor(s/3600)+':'+String(Math.floor(s/60)%60).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
 const fmtT = s => { s=Math.max(0,s); const m=Math.floor(s/60), r=s-m*60;
   return m+':'+(r<10?'0':'')+r.toFixed(1); };
 const parseT = str => { const m=String(str).trim().match(/^(?:(\d+):)?(\d+(?:\.\d+)?)$/);
@@ -6619,7 +6634,7 @@ function ensureLP(){
     try{
       const load=src=>new Promise((res,rej)=>{ const im=new Image();
         im.onload=()=>res(im); im.onerror=rej; im.src=src; });
-      const [d,r,a]=await Promise.all([load('lp_deck.png'),load('lp_record.png'),load('lp_arm.png')]);
+      const [d,r,a]=await Promise.all([load('assets/lp_deck.png'),load('assets/lp_record.png'),load('assets/lp_arm.png')]);
       lpDeck=d; lpRec=r; lpArm=a;
     }catch(e){ lpFailed=true; }
   })();
@@ -6855,15 +6870,23 @@ function emFill(g, segs, cx, y, setFont, fz, base, accent){
   }
   g.textAlign=prevAlign;
 }
+/* 쇼츠 탭에서 스타일을 고르는 동안 작업 화면에 띄워 보여 주는 임시 문구
+   (클립이 아니라 미리보기 전용 — 내보내기에는 들어가지 않는다) */
+let hookGhost=null;
 function drawOverlays(t){
-  const {g,w,h}=R;
   for(const tr of state.tracks) if(tr.kind==='over')
     for(const c of tr.clips){
       if(t<c.start||t>=clipEnd(c)) continue;
-      let alpha=c.tx.opacity;
       const lt=t-c.start, rem=c.dur-lt;
+      let alpha=c.tx.opacity;
       if(c.fadeIn>0&&lt<c.fadeIn) alpha*=lt/c.fadeIn;
       if(c.fadeOut>0&&rem<c.fadeOut) alpha*=rem/c.fadeOut;
+      paintOverlay(c, lt, alpha);
+    }
+  if(R.preview && hookGhost) paintOverlay(hookGhost, 99, .95);
+}
+function paintOverlay(c, lt, alpha){
+      const {g,w,h}=R;
       const F=FONTS[c.ofont||0];
       const portrait=h>w;
       const fs=Math.round(w*(portrait?.05:.036)*(c.osize||1)*F.mul);
@@ -6945,8 +6968,8 @@ function drawOverlays(t){
           emFill(g, segsOf[i], x, cy, setF, fz, base, accent);
           cy+=fz*.24+gap; });
         g.restore();
-        if(R.preview) HIT.push({id:'ov:'+c.id, x:0, y:bandTop, w, h:bandBot-bandTop});
-        continue;
+        if(R.preview && c.id) HIT.push({id:'ov:'+c.id, x:0, y:bandTop, w, h:bandBot-bandTop});
+        return;
       }
       /* 배경/하이라이트 */
       if(sty==='box'||sty==='hilite'){
@@ -7000,8 +7023,7 @@ function drawOverlays(t){
         g.fillStyle=base;
       }
       g.restore();
-      if(R.preview) HIT.push({id:'ov:'+c.id, x:x-mw/2-w*.01, y:y0-fs*1.05, w:mw+w*.02, h:lh*lines.length+fs*.3});
-    }
+      if(R.preview && c.id) HIT.push({id:'ov:'+c.id, x:x-mw/2-w*.01, y:y0-fs*1.05, w:mw+w*.02, h:lh*lines.length+fs*.3});
 }
 
 /* ═══════ 자막 렌더러 (캡컷 스타일 템플릿 6종) ═══════ */
@@ -8378,6 +8400,7 @@ let HOOKS=(()=>{ try{ const v=JSON.parse(localStorage.getItem(HOOK_KEY)||'null')
 function saveHooks(){ try{ localStorage.setItem(HOOK_KEY, JSON.stringify(HOOKS)); }catch(e){} }
 /* 스타일을 바꾸면 이미 타임라인에 들어간 후킹 문구에도 그대로 반영 */
 function applyHookStyle(){
+  if(ghostOn()) syncHookGhost(true);
   const T=state.tracks.find(t=>t.kind==='over'); if(!T) return 0;
   const ex=hookExtra(); delete ex.ohook;
   let n=0;
@@ -8453,7 +8476,7 @@ function renderHooks(){
     const b=document.createElement('button');
     b.className='chip'+(k===hookCat?' on':'');
     b.textContent=k+(HOOKS[k].length?` ${HOOKS[k].length}`:'');
-    b.onclick=()=>{ hookCat=k; renderHooks(); };
+    b.onclick=()=>{ hookCat=k; ghostText=''; renderHooks(); if(ghostOn()) syncHookGhost(true); };
     cr.appendChild(b);
   }
   lr.innerHTML='';
@@ -8469,7 +8492,8 @@ function renderHooks(){
     use.className='chip hk-item';
     use.textContent=t.replace(/\n/g,'  /  ');      /* 두 줄 문구는 / 로 구분해 보여준다 */
     use.title='누르면 재생 헤드 위치에 넣습니다'+(t.includes('\n')?' (두 줄 문구)':'');
-    use.onclick=()=>addHookOverlay(t);
+    use.onmouseenter=()=>previewHook(t);
+    use.onclick=()=>{ previewHook(t); addHookOverlay(t); };
     const ed=document.createElement('button'); ed.className='mini'; ed.textContent='✎'; ed.title='문구 수정';
     const rm=document.createElement('button'); rm.className='mini'; rm.textContent='✕'; rm.title='문구 삭제';
     ed.onclick=()=>{
@@ -8490,6 +8514,16 @@ function renderHooks(){
     row.append(use,ed,rm); lr.appendChild(row);
   });
 }
+/* 쇼츠 탭에 있는 동안 고른 스타일을 작업 화면에 그대로 띄워 준다 */
+let ghostText='';
+function syncHookGhost(on){
+  if(!on){ if(hookGhost){ hookGhost=null; drawNow(); } return; }
+  const txt=ghostText || (hookPool()[0]||'볼륨 올려. 3초 뒤에 알게 됨');
+  hookGhost=Object.assign({otext:txt, tx:{x:.5, y:.16, opacity:1}, fadeIn:0, fadeOut:0}, hookExtra());
+  drawNow();
+}
+function ghostOn(){ return document.querySelector('#sideTabs button[data-tab="tabShorts"]')?.classList.contains('on'); }
+function previewHook(txt){ ghostText=txt||''; if(ghostOn()) syncHookGhost(true); }
 function addHookPhrase(v){
   v=(v||'').trim(); if(!v) return false;
   (HOOKS[hookCat]=HOOKS[hookCat]||[]).push(v); saveHooks(); renderHooks();
@@ -9151,6 +9185,7 @@ document.querySelectorAll('#sideTabs button').forEach(b=>b.addEventListener('cli
   document.querySelectorAll('#sideTabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tabPane').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $(b.dataset.tab).classList.add('on');
+  syncHookGhost(b.dataset.tab==='tabShorts');
 }));
 /* 전체화면 */
 const pwrap=document.querySelector('.preview-wrap');
@@ -9173,7 +9208,7 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ═══════ 내보내기 ═══════ */
-const exp={w:1920,h:1080,scale:1,fps:30, start:0, end:0, fadeIn:0, fadeOut:0};
+const exp={w:1920,h:1080,scale:1,fps:30, start:0, end:0, fadeIn:0, fadeOut:0, loop:1};
 $('exportBtn').onclick=()=>{
   const dur=tlDuration();
   if(dur<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
@@ -9189,6 +9224,7 @@ $('exportBtn').onclick=()=>{
   exp.start=clamp(exp.start,0,dur); exp.end=clamp(exp.end,exp.start+0.1,dur);
   $('expStart').value=fmtT(exp.start); $('expEnd').value=fmtT(exp.end);
   $('expFadeIn').value=exp.fadeIn||0; $('expFadeOut').value=exp.fadeOut||0;
+  $('expLoop').value=exp.loop||1;
   expEst();
   $('expDlg').classList.add('show');
 };
@@ -9223,11 +9259,16 @@ $('expRangeFull').onclick=()=>{ const dur=tlDuration(); exp.start=0; exp.end=dur
   $('expStart').value=fmtT(0); $('expEnd').value=fmtT(dur); expEst(); updateTlSel(); };
 $('expFadeIn').addEventListener('change',e=>{ exp.fadeIn=Math.max(0,+e.target.value||0); expEst(); });
 $('expFadeOut').addEventListener('change',e=>{ exp.fadeOut=Math.max(0,+e.target.value||0); expEst(); });
+const setLoop=v=>{ exp.loop=clamp(Math.round(v)||1,1,60); $('expLoop').value=exp.loop; expEst(); };
+$('expLoop').addEventListener('change',e=>setLoop(+e.target.value));
+$('expLoopUp').onclick=()=>setLoop((exp.loop||1)+1);
+$('expLoopDn').onclick=()=>setLoop((exp.loop||1)-1);
 function expEst(){
   const dur=tlDuration();
   const outDur=Math.max(0.1, (exp.end>exp.start? exp.end : dur) - exp.start);
   const W=exp.w*exp.scale,H=exp.h*exp.scale;
-  const estGB=(W*H*(exp.fps===60?3.4:2.8)+192000)*outDur/8/1e9;
+  const LOOP=Math.max(1, exp.loop||1);
+  const estGB=(W*H*(exp.fps===60?3.4:2.8)+192000)*outDur*LOOP/8/1e9;
   const rangeNote = (exp.start>0.01||exp.end<dur-0.01)? ` <b style="color:var(--amber)">(구간 ${fmt(exp.start)}~${fmt(exp.end||dur)})</b>`:'';
   /* 인코딩 부하 = 초당 픽셀 수. 1080p30 대비 몇 배인지로 무거움을 안내 */
   const load=(W*H*exp.fps)/(1920*1080*30);
@@ -9238,13 +9279,77 @@ function expEst(){
   }else if(load>=3.5){
     warn=`<br><span style="color:var(--amber)">부하가 1080p 30fps의 약 ${load.toFixed(1)}배입니다 — 긴 영상은 시간이 걸릴 수 있어요.</span>`;
   }
-  $('expEst').innerHTML=`길이 ${fmt(outDur)}${rangeNote} · ${W}×${H} @${exp.fps}fps · 예상 용량 약 <b style="color:var(--mist)">${estGB<1? (estGB*1000).toFixed(0)+'MB' : estGB.toFixed(1)+'GB'}</b>${warn}<br>자막·텍스트·효과는 영상에 번인(burn-in)됩니다. WebCodecs 고속 렌더 → 미지원 시 호환 모드 제공.`;
+  $('expLoopNote').textContent = LOOP>1
+    ? `${LOOP}회 — ${fmtH(outDur)} → ${fmtH(outDur*LOOP)} (인코딩은 ${fmtH(outDur)} 분량만)`
+    : '1회 — 반복 없음';
+  $('expEst').innerHTML=`길이 ${fmtH(outDur)}${LOOP>1?` <b style="color:var(--amber)">×${LOOP} = ${fmtH(outDur*LOOP)}</b>`:''}${rangeNote} · ${W}×${H} @${exp.fps}fps · 예상 용량 약 <b style="color:var(--mist)">${estGB<1? (estGB*1000).toFixed(0)+'MB' : estGB.toFixed(1)+'GB'}</b>${warn}<br>자막·텍스트·효과는 영상에 번인(burn-in)됩니다. WebCodecs 고속 렌더 → 미지원 시 호환 모드 제공.`;
 }
 $('expGo').onclick=async()=>{
   $('expDlg').classList.remove('show');
   await startExport();
 };
 
+/* ── 루프용 청크 보관소 ──
+   인코딩된 패킷을 그대로 모아 뒀다가 타임스탬프만 밀어서 다시 붙입니다.
+   같은 화면을 다시 인코딩하지 않으므로 걸리는 시간은 1회분 그대로입니다. */
+const STASH_MEM_MAX=600e6;                 /* 이보다 크면 디스크(OPFS)로 */
+/* 렌더가 중간에 끊겼을 때 남은 임시 파일 청소 */
+async function sweepStash(){
+  try{ const root=await navigator.storage.getDirectory();
+    const old=[]; for await (const [n] of root.entries()) if(n.startsWith('__loop_')) old.push(n);
+    for(const n of old) try{ await root.removeEntry(n); }catch(e){}
+  }catch(e){}
+}
+sweepStash();
+async function makeStash(){
+  const st={ v:[], a:[], off:0, mem:[], q:[], qBytes:0, fh:null, ws:null,
+    async init(){
+      try{
+        const root=await navigator.storage.getDirectory();
+        st.fh=await root.getFileHandle('__loop_'+Date.now()+'.bin',{create:true});
+        st.ws=await st.fh.createWritable({keepExistingData:false});
+      }catch(e){ console.warn('OPFS 사용 불가 — 메모리에 보관', e); }
+    },
+    push(kind, chunk, u8){
+      (kind==='v'? st.v : st.a).push({o:st.off, n:u8.byteLength,
+        type:chunk.type, ts:chunk.timestamp, du:chunk.duration||0});
+      st.off+=u8.byteLength;
+      if(st.ws && st.off>STASH_MEM_MAX){ st.q.push(u8); st.qBytes+=u8.byteLength; }
+      else st.mem.push(u8);
+    },
+    async flush(){ if(!st.ws||!st.q.length) return;
+      const blob=new Blob(st.q); st.q=[]; st.qBytes=0; await st.ws.write(blob); st.wrote=true; },
+    async maybeFlush(){ if(st.qBytes>16e6) await st.flush(); },
+    /* 메모리 보관분이 한계를 넘으면 통째로 디스크로 내림 */
+    async spill(){
+      if(!st.ws || !st.mem.length || st.off<=STASH_MEM_MAX) return;
+      const blob=new Blob(st.mem); st.mem=[]; await st.ws.write(blob); st.wrote=true;
+    },
+    async seal(){ await st.spill(); await st.flush();
+      if(st.ws){ try{ await st.ws.close(); }catch(e){} st.ws=null;
+        /* 디스크로 내려간 게 없으면 메모리 보관분을 그대로 쓴다.
+           예전엔 빈 임시 파일을 읽어 0바이트 패킷을 붙였다. */
+        if(st.wrote) st.file=await st.fh.getFile(); } },
+    async read(o,n){
+      if(!st.file){                                  /* 메모리 경로 */
+        if(!st.flat){ st.flat=new Uint8Array(st.off); let p=0;
+          for(const u of st.mem){ st.flat.set(u,p); p+=u.byteLength; } st.mem=null; }
+        return st.flat.subarray(o,o+n);
+      }
+      if(!st.buf || o<st.bufAt || o+n>st.bufAt+st.buf.byteLength){
+        const BLK=Math.max(16<<20, n);
+        st.bufAt=o;
+        st.buf=new Uint8Array(await st.file.slice(o, Math.min(st.file.size, o+BLK)).arrayBuffer());
+      }
+      return st.buf.subarray(o-st.bufAt, o-st.bufAt+n);
+    },
+    async dispose(){ st.mem=null; st.flat=null; st.buf=null; st.file=null;
+      if(st.fh){ try{ const root=await navigator.storage.getDirectory();
+        await root.removeEntry(st.fh.name); }catch(e){} } }
+  };
+  await st.init();
+  return st;
+}
 async function startExport(){
   if(state.rendering) return;
   pause(); stopSnippet(); ensureCtx();
@@ -9281,7 +9386,7 @@ async function startExport(){
 
   /* 저장 위치 (Chrome: 디스크 직접 기록) */
   let fileWritable=null;
-  const estGB=(vCfg.bitrate+192000)*outDur/8/1e9;
+  const estGB=(vCfg.bitrate+192000)*outDur*Math.max(1,Math.round(exp.loop||1))/8/1e9;
   if(batchMode && batchDir){
     /* 폴더를 골라 두면 파일마다 묻지 않고 그 안에 바로 쓴다 */
     try{
@@ -9329,8 +9434,17 @@ async function startExport(){
     fastStart: fileWritable? false : 'in-memory',
   });
   let encErr=null, vPkts=0, aPkts=0;
+  const LOOPN=Math.max(1, Math.round(exp.loop||1));
+  let stash=null;
+  if(LOOPN>1){ try{ stash=await makeStash(); }
+    catch(e){ console.error('stash',e); setStatus('루프용 임시 저장을 열지 못해 1회만 인코딩합니다.'); } }
+  let vEndUs=0, aEndUs=0;                       /* 실제로 인코딩된 마지막 지점 */
+  const keep=(kind,chunk)=>{ if(!stash) return;
+    const end=chunk.timestamp+(chunk.duration||0);
+    if(kind==='v') vEndUs=Math.max(vEndUs,end); else aEndUs=Math.max(aEndUs,end);
+    const u8=new Uint8Array(chunk.byteLength); chunk.copyTo(u8); stash.push(kind,chunk,u8); };
   const vEnc=new VideoEncoder({
-    output:(chunk,meta)=>{muxer.addVideoChunk(chunk,meta); vPkts++;},
+    output:(chunk,meta)=>{muxer.addVideoChunk(chunk,meta); keep('v',chunk); vPkts++;},
     error:e=>{encErr=e; console.error('vEnc',e);}
   });
   vEnc.configure(vCfg);
@@ -9344,7 +9458,7 @@ async function startExport(){
     const CHUNK=4096, plane=new Float32Array(CHUNK*2);
     if(hasAudio){
       aEnc=new AudioEncoder({
-        output:(chunk,meta)=>{muxer.addAudioChunk(chunk,meta); aPkts++;},
+        output:(chunk,meta)=>{muxer.addAudioChunk(chunk,meta); keep('a',chunk); aPkts++;},
         error:e=>{encErr=e; console.error('aEnc',e);}
       });
       aEnc.configure(aCfg);
@@ -9415,6 +9529,7 @@ async function startExport(){
           setStatus(`<span class="rec">⚡ 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
             +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}`
             +(encoderPickNote? ` · ${encoderPickNote}`:'')+`</span>`);
+          if(stash){ await stash.spill(); await stash.maybeFlush(); }
           await yieldTask();
         }
       }
@@ -9426,6 +9541,39 @@ async function startExport(){
     }
     await withTimeout(vEnc.flush(),60000,'영상 flush 타임아웃');
     vEnc.close();
+
+    /* ── 루프: 인코딩된 패킷을 타임스탬프만 밀어서 다시 붙인다 ── */
+    if(stash && !state.cancelRender && !encErr && LOOPN>1){
+      await stash.seal();
+      /* 한 바퀴 길이는 두 트랙 중 늦게 끝나는 쪽에 맞춘다 */
+      const LOOP_US=Math.max(vEndUs, aEndUs, totalFrames*1e6/FPS);
+      const recs=[...stash.v.map(r=>({...r,k:'v'})), ...stash.a.map(r=>({...r,k:'a'}))]
+        .sort((x,y)=>x.o-y.o);
+      /* 먹서는 트랙별로 시각이 반드시 커져야 하므로 마지막 값을 들고 다닌다 */
+      const lastTs={v:vEndUs? vEndUs-1 : -1, a:aEndUs? aEndUs-1 : -1};
+      for(const r of recs) if(r.ts>lastTs[r.k]) lastTs[r.k]=r.ts;
+      for(let i=1;i<LOOPN && !state.cancelRender;i++){
+        const off=Math.round(LOOP_US*i);
+        for(let j=0;j<recs.length;j++){
+          if(state.cancelRender) break;
+          const r=recs[j];
+          const data=(await stash.read(r.o,r.n)).slice();   /* 먹서가 나중에 쓰므로 사본 */
+          const ts=Math.max(r.ts+off, lastTs[r.k]+1);
+          lastTs[r.k]=ts;
+          if(r.k==='v'){ muxer.addVideoChunkRaw(data, r.type, ts, r.du); vPkts++; }
+          else { muxer.addAudioChunkRaw(data, r.type, ts, r.du); aPkts++; }
+          if((j&1023)===0){
+            const pct=(i-1+j/recs.length)/(LOOPN-1);
+            $('progressFill').style.width=(pct*100)+'%';
+            setStatus(`<span class="rec">🔁 루프 이어 붙이는 중</span> — ${i+1}/${LOOPN}회 · ${Math.round(pct*100)}%`
+              +`<br><span style="font-size:11px">다시 인코딩하지 않고 패킷만 복사합니다</span>`);
+            await yieldTask();
+          }
+        }
+      }
+      await stash.dispose(); stash=null;
+    }
+    if(stash){ await stash.dispose(); stash=null; }
 
     if(state.cancelRender){
       if(fileWritable) try{await fileWritable.close();}catch(e){}
@@ -9441,7 +9589,7 @@ async function startExport(){
       a.className='dl'; a.href='#';
       a.innerHTML=`<span>✅ ${name} — 선택한 위치에 저장됨</span><span class="save">✓</span>`;
       $('downloads').appendChild(a);
-      setStatus(`✅ 완성 — ${fmt(outDur)} 분량 · ${fmt(took)} 소요 (디스크 직접 저장)`);
+      setStatus(`✅ 완성 — ${fmtH(outDur*LOOPN)} 분량${LOOPN>1?` (${fmtH(outDur)} × ${LOOPN}회)`:''} · ${fmt(took)} 소요 (디스크 직접 저장)`);
     }else{
       const buf=muxer.target.buffer;
       if(!buf||buf.byteLength===0){ setStatus('인코딩 결과가 비어 있습니다 — Chrome에서 저장 위치 지정을 사용해 보세요.'); return; }
@@ -9453,7 +9601,7 @@ async function startExport(){
       $('downloads').appendChild(a);
       try{a.click();}catch(e){}
       setTimeout(()=>URL.revokeObjectURL(url),180000);
-      setStatus(`✅ 완성 — ${fmt(outDur)} 분량 · ${fmt(took)} 소요 · ${(blob.size/1048576).toFixed(1)}MB`);
+      setStatus(`✅ 완성 — ${fmtH(outDur*LOOPN)} 분량${LOOPN>1?` (${fmtH(outDur)} × ${LOOPN}회)`:''} · ${fmt(took)} 소요 · ${(blob.size/1048576).toFixed(1)}MB`);
     }
     $('progressFill').style.width='100%';
   }catch(e){
@@ -9462,6 +9610,7 @@ async function startExport(){
     setStatus(`인코딩 오류: ${e.message||e}<br>해상도·프레임레이트를 낮추거나 호환 모드를 사용해 보세요.`);
     offerRealtime('');
   }finally{
+    if(stash){ try{ await stash.dispose(); }catch(e){} stash=null; }
     state.rendering=false; state.cancelRender=false;
     pauseAllVideos();                 /* 순차 재생으로 돌린 소스를 반드시 멈춘다 */
     eachVideoClip((c,tr,a)=>{ a.videoEl.playbackRate=1; });
