@@ -8114,6 +8114,13 @@ function spreadLyrics(lines, inS, srcDur){
     e: inS+pad+span*((i+1)/n),
     text }));
 }
+/* 한글이 실린 줄인지 — 원문/번역 짝을 가려낼 때 쓴다 */
+function isKoLine(s){
+  const t=String(s||'').replace(/\s/g,'');
+  if(!t) return false;
+  const ko=(t.match(/[가-힣]/g)||[]).length;
+  return ko/t.length > .28;
+}
 /* LRC(가사) 파서 — 시작 시각만 있으므로 다음 줄 시작을 끝 시각으로 계산 */
 function parseLRC(text){
   const reT=/\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
@@ -8127,7 +8134,15 @@ function parseLRC(text){
       const s=(+m[1])*60+(+m[2])+(m[3]? (+m[3].padEnd(3,'0'))/1000 : 0);
       times.push(s);
     }
-    if(!times.length) continue;
+    if(!times.length){
+      /* 타임코드 없는 줄 — 바로 위 줄의 번역으로 본다 (A-B 블록형 이중언어 LRC)
+           [00:03.67]Say less
+           덜 말해보세요                                      */
+      if(/^\s*\[[a-z]+:/i.test(line)) continue;          /* [ti:] 같은 메타태그 */
+      const t2=lrcClean(line);
+      if(t2 && out.length && !out[out.length-1].untimed) out[out.length-1].untimed=t2;
+      continue;
+    }
     const txt=lrcClean(line.replace(reT,''));
     if(!txt) continue;                                  /* 메타태그·빈 줄 스킵 */
     for(const s of times) out.push({s:Math.max(0,s+offset), text:txt});
@@ -8141,8 +8156,25 @@ function parseLRC(text){
   const merged=[];
   for(const it of out){
     const prev=merged[merged.length-1];
-    if(prev && !prev.text2 && Math.abs(it.s-prev.s)<.02 && it.text!==prev.text) prev.text2=it.text;
+    /* 같은 시각이거나, 0.4초 안쪽이면서 한쪽만 한글이면 원문·번역 한 쌍으로 본다.
+       번역 줄에 0.01~0.1초쯤 밀린 타임코드가 붙어 오는 파일이 흔하다. */
+    const near = prev && Math.abs(it.s-prev.s)<.02;
+    const pair = prev && Math.abs(it.s-prev.s)<.4 && isKoLine(it.text)!==isKoLine(prev.text);
+    if(prev && !prev.text2 && it.text!==prev.text && (near||pair)){
+      prev.text2=it.text;
+      if(it.untimed && !prev.untimed) prev.untimed=it.untimed;
+    }
     else merged.push(it);
+  }
+  for(const it of merged){
+    if(!it.text2 && it.untimed) it.text2=it.untimed;
+    if(!it.text2){
+      /* 한 줄에 「원문 / 번역」이 같이 든 형식 — 한쪽만 한글일 때만 가른다
+         (24/7 처럼 뜻이 있는 슬래시를 잘못 자르지 않도록) */
+      const m=it.text.match(/^(.+?)\s*(?:\/\/|[|/｜·])\s*(.+)$/);
+      if(m && isKoLine(m[1])!==isKoLine(m[2])){ it.text=m[1].trim(); it.text2=m[2].trim(); }
+    }
+    delete it.untimed;
   }
   for(let i=0;i<merged.length;i++){
     merged[i].e = i<merged.length-1? merged[i+1].s : merged[i].s+4;
