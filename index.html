@@ -784,6 +784,26 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div id="shList"></div>
       <div class="empty-note" id="shEmpty">아직 목록이 없습니다 — 「하이라이트 자동 추출」로 곡마다 후렴을 찾아 담거나,<br>타임라인에서 원하는 지점을 클릭하고 「현재 위치로 추가」를 누르세요</div>
       <div class="hint2">위의 <b>길이</b>는 새로 담는 항목의 기본값(30초)이고, <b>줄마다 길이를 따로</b> 정할 수 있습니다. <b>⤓</b> 는 재생 헤드 위치를 그 항목의 시작점으로 바꿉니다.</div>
+      <div class="opt-label" style="margin-top:10px">내보내기 설정</div>
+      <div class="row" id="shResRow">
+        <button class="chip on" data-w="1080" data-h="1920">1080×1920</button>
+        <button class="chip" data-w="720" data-h="1280">720×1280</button>
+        <button class="chip" data-w="1440" data-h="2560">1440×2560</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <div class="row" id="shScaleRow" style="gap:4px">
+          <button class="chip on" data-s="1">표준 1x</button>
+          <button class="chip" data-s="2">고화질 2x</button>
+        </div>
+        <div class="row" id="shFpsRow" style="gap:4px;margin-left:6px">
+          <button class="chip on" data-fps="30">30 fps</button>
+          <button class="chip" data-fps="60">60 fps</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:6px;align-items:center">
+        <button class="chip" id="shPickDir">📁 저장 폴더 선택</button>
+        <span class="hint2" id="shDirName" style="margin:0">폴더를 고르지 않으면 브라우저 다운로드 폴더로 갑니다</span>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="chip" id="shExportAll" style="border-color:var(--amber);color:var(--amber)">⚡ 목록 전부 내보내기</button>
         <button class="chip" id="shStop" style="display:none">중지</button>
@@ -2948,6 +2968,9 @@ const yieldTask=()=>new Promise(r=>{const c=new MessageChannel();c.port1.onmessa
    인코더가 거부하고 소프트웨어로 떨어질 수 있어, 해상도·fps에 맞는 레벨을 지정한다. */
 let encoderPickNote='';
 let batchMode=false, exportNameOverride='';
+/* 쇼츠 일괄 내보내기 설정 — 해상도·화질·프레임·저장 폴더 */
+let batchDir=null;                                  /* 고른 폴더 핸들 (없으면 다운로드 폴더) */
+const shExp={w:1080, h:1920, scale:1, fps:30};
 /* 후보 설정을 짧게 실제 인코딩해 처리량을 재고 가장 빠른 것을 선택 */
 /* 후보를 실제로 돌려보고 제일 빠른 인코더 설정을 고른다.
    측정 조건이 내보내기와 달라지면 엉뚱한 걸 고른다. 예전엔 10프레임·큐 깊이 4로 쟀는데,
@@ -8744,6 +8767,29 @@ $('shAddHere').onclick=()=>{
 $('shClear').onclick=()=>{ shortsQueue=[]; renderShortsList(); };
 $('shStop').onclick=()=>{ shortsAbort=true; state.cancelRender=true; };
 
+/* 내보내기 설정 칩 (해상도·화질·프레임) */
+[['shResRow',b2=>{ shExp.w=+b2.dataset.w; shExp.h=+b2.dataset.h; }],
+ ['shScaleRow',b2=>{ shExp.scale=+b2.dataset.s; }],
+ ['shFpsRow',b2=>{ shExp.fps=+b2.dataset.fps; }]].forEach(([rid,fn])=>{
+  $(rid).addEventListener('click',e=>{
+    const b2=e.target.closest('.chip'); if(!b2) return;
+    [...e.currentTarget.children].forEach(c=>c.classList.remove('on'));
+    b2.classList.add('on'); fn(b2);
+    $('shDirName').dataset.est='';
+  });
+});
+/* 저장 폴더 고르기 — 한 번 고르면 목록 전체가 그 안에 저장된다 */
+$('shPickDir').onclick=async()=>{
+  if(!window.showDirectoryPicker){
+    setStatus('이 브라우저는 폴더 선택을 지원하지 않습니다 — 다운로드 폴더로 저장됩니다. (Chrome 권장)');
+    return;
+  }
+  try{
+    batchDir=await showDirectoryPicker({mode:'readwrite', id:'pulseorign-shorts'});
+    $('shDirName').innerHTML=`저장 폴더: <b style="color:var(--amber)">${batchDir.name}</b>`;
+    $('shPickDir').textContent='📁 폴더 변경';
+  }catch(err){ if(err.name!=='AbortError') console.error(err); }
+};
 $('shExportAll').onclick=async()=>{
   if(shortsBusy) return;
   if(!shortsQueue.length){ setStatus('내보낼 목록이 없습니다.'); return; }
@@ -8754,7 +8800,10 @@ $('shExportAll').onclick=async()=>{
   const T2=state.tracks.find(t=>t.kind==='over');
   const fadeS=clamp(+$('shFade').value||0, 0, 3);
   const want=clamp(+$('shLen').value||30,5,180);   /* 새 항목의 기본 길이 */
-  const savedRange={start:exp.start,end:exp.end,fi:exp.fadeIn,fo:exp.fadeOut};
+  const savedRange={start:exp.start,end:exp.end,fi:exp.fadeIn,fo:exp.fadeOut,
+                    w:exp.w,h:exp.h,scale:exp.scale,fps:exp.fps};
+  /* 목록 전체에 같은 해상도·화질·프레임을 쓴다 */
+  exp.w=shExp.w; exp.h=shExp.h; exp.scale=shExp.scale; exp.fps=shExp.fps;
   const dateTag=new Date().toISOString().slice(0,10);
   let okCount=0;
   batchMode=true;
@@ -8788,12 +8837,14 @@ $('shExportAll').onclick=async()=>{
     await yieldTask();
   }
   batchMode=false; exportNameOverride='';
-  Object.assign(exp,{start:savedRange.start,end:savedRange.end,fadeIn:savedRange.fi,fadeOut:savedRange.fo});
+  Object.assign(exp,{start:savedRange.start,end:savedRange.end,fadeIn:savedRange.fi,fadeOut:savedRange.fo,
+                     w:savedRange.w,h:savedRange.h,scale:savedRange.scale,fps:savedRange.fps});
   renderAll();
   $('shStop').style.display='none'; $('shExportAll').disabled=false;
   shortsBusy=false;
-  $('shProg').innerHTML=`✅ ${okCount}/${shortsQueue.length}개 완료 — 다운로드 목록을 확인하세요.`;
-  setStatus(`쇼츠 ${okCount}개를 내보냈습니다.`);
+  const where=batchDir? `폴더 「${batchDir.name}」` : '다운로드 폴더';
+  $('shProg').innerHTML=`✅ ${okCount}/${shortsQueue.length}개 완료 — ${where}에 저장했습니다.`;
+  setStatus(`쇼츠 ${okCount}개를 ${shExp.w*shExp.scale}×${shExp.h*shExp.scale} ${shExp.fps}fps로 ${where}에 내보냈습니다.`);
 };
 renderHooks(); renderHookStyle(); renderShortsList();
 
@@ -9231,7 +9282,15 @@ async function startExport(){
   /* 저장 위치 (Chrome: 디스크 직접 기록) */
   let fileWritable=null;
   const estGB=(vCfg.bitrate+192000)*outDur/8/1e9;
-  if(window.showSaveFilePicker && !batchMode){
+  if(batchMode && batchDir){
+    /* 폴더를 골라 두면 파일마다 묻지 않고 그 안에 바로 쓴다 */
+    try{
+      const nm=exportNameOverride || `export_${W}x${H}.mp4`;
+      const fh=await batchDir.getFileHandle(nm,{create:true});
+      fileWritable=await fh.createWritable();
+    }catch(err){ console.error('batch dir write',err);
+      setStatus('고른 폴더에 쓸 수 없어 다운로드 폴더로 저장합니다.'); }
+  }else if(window.showSaveFilePicker && !batchMode){
     try{
       const handle=await showSaveFilePicker({
         suggestedName:`export_${W}x${H}_${new Date().toISOString().slice(0,10)}.mp4`,
