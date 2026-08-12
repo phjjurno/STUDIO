@@ -702,7 +702,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" id="vttExportBtn">VTT 내보내기</button>
         <button class="chip" id="subAddBtn">＋ 자막 추가</button>
       </div>
-      <div class="hint2" style="margin-top:6px">LRC 가사는 <b>곡 단위</b>로 들어갑니다. 여러 파일을 한꺼번에 고르면 파일 안의 <b>[ti:] 제목</b>과 파일명을 곡 제목과 대조해 <b>곡마다 자동 배정</b>합니다. 한 개만 넣을 때도 제목이 맞으면 그 곡으로, 아니면 재생목록에서 누른 곡으로 들어갑니다. SRT·VTT는 타임라인 전체 기준입니다.</div>
+      <div class="hint2" style="margin-top:6px">LRC 가사는 <b>곡 단위</b>로 들어갑니다. 여러 파일을 한꺼번에 고르면 파일 안의 <b>[ti:] 제목</b>과 파일명을 곡 제목과 대조해 <b>곡마다 자동 배정</b>합니다. 한 개만 넣을 때도 제목이 맞으면 그 곡으로, 아니면 재생목록에서 누른 곡으로 들어갑니다. SRT·VTT는 타임라인 전체 기준입니다.</div><div class="row" style="margin-top:6px;align-items:center;gap:6px"><span class="fl" style="font-size:11px;color:var(--dim)">가져올 트랙</span><button class="chip on" data-imp="auto" id="subImpAuto">자동</button><button class="chip" data-imp="s1">S1 원문</button><button class="chip" data-imp="s2">S2 번역</button></div><div class="hint2" style="margin-top:6px">자막 트랙이 <b>S1 원문 / S2 번역</b> 둘로 나뉩니다. 영어 파일과 한글 파일을 <b>같이 골라 넣으면</b> 파일명(.ko 등)과 한글 비율로 알아서 갈라 담고, 화면에는 위=원문 / 아래=번역으로 함께 나옵니다.</div>
       <div id="subList"></div>
       <div class="empty-note" id="subEmpty">자막이 없습니다 — 자동 생성하거나 SRT를 가져오세요</div>
       </div></div>
@@ -3061,6 +3061,7 @@ const TRANS_NAMES={none:'컷(없음)',dissolve:'크로스 디졸브',slide:'슬�
 function defaultTracks(){ return [
   {id:'T1', kind:'over', name:'T1', clips:[]},
   {id:'S1', kind:'sub',  name:'S1', clips:[]},
+  {id:'S2', kind:'sub',  name:'S2', role:'tr', clips:[]},   /* 번역(해석) 자막 */
   {id:'V1', kind:'video',name:'V1', clips:[]},
   {id:'A1', kind:'audio',name:'A1', pl:true, clips:[]},
 ];}
@@ -3122,7 +3123,7 @@ let lastUndoMark=0;
 function markUndo(){ const n=Date.now(); if(n-lastUndoMark>800) pushUndo(); lastUndoMark=n; }
 function applySer(s){
   const o=JSON.parse(s);
-  state.tracks=o.tracks; state.subStyle=o.subStyle;
+  state.tracks=o.tracks; ensureSubTracks(); state.subStyle=o.subStyle;
   for(const tr of state.tracks) for(const c of tr.clips){
     if(c.lyricsRaw!==undefined){ const a=A(c.assetId);
       c.lyrics=parseLyrics(c.lyricsRaw, a? a.duration : c.dur); }
@@ -3474,7 +3475,7 @@ function renderTL(){
     const row=document.createElement('div');
     row.className='tlTrack'+((tr.kind==='sub'||tr.kind==='over')?' small':'');
     const head=document.createElement('div'); head.className='tlHead';
-    head.innerHTML=`<b>${tr.name}</b><span>${KIND_LABEL[tr.kind]}${tr.pl?' · 플레이리스트':''}</span>`;
+    head.innerHTML=`<b>${tr.name}</b><span>${KIND_LABEL[tr.kind]}${tr.role==='tr'?' · 번역':''}${tr.pl?' · 플레이리스트':''}</span>`;
     /* 트랙 이름을 누르면 그 트랙 클립 전체 선택 → 크기·볼륨 등을 한 번에 조절 */
     head.title='클릭하면 이 트랙의 클립을 모두 선택합니다 (일괄 편집)';
     head.style.cursor='pointer';
@@ -6981,7 +6982,17 @@ function drawOverlays(t){
 }
 
 /* ═══════ 자막 렌더러 (캡컷 스타일 템플릿 6종) ═══════ */
-function subTrack(){ return state.tracks.find(tr=>tr.kind==='sub'); }
+/* 자막 트랙은 둘이다 — S1 원문, S2 번역(해석).
+   예전 프로젝트에는 S1만 있으므로 열 때 S2를 채워 넣는다. */
+function subTrack(){ return state.tracks.find(tr=>tr.kind==='sub'&&tr.role!=='tr'); }
+function subTrack2(){ return state.tracks.find(tr=>tr.kind==='sub'&&tr.role==='tr'); }
+function ensureSubTracks(){
+  if(!state.tracks.some(t=>t.kind==='sub')) state.tracks.unshift({id:'S1',kind:'sub',name:'S1',clips:[]});
+  if(!subTrack2()){
+    const i=state.tracks.findIndex(t=>t.kind==='sub');
+    state.tracks.splice(i+1,0,{id:uid(),kind:'sub',name:'S2',role:'tr',clips:[]});
+  }
+}
 function activeSub(t){
   const S=subTrack(); if(!S) return null;
   return sortedClips(S).find(c=>t>=c.start&&t<clipEnd(c)) || null;
@@ -7029,7 +7040,12 @@ function drawSubs(t){
   const lineH=fs*1.3;
   const cx=st.x*w, byBase=st.y*h;
   /* ── 번역(아랫줄) 미리 계산 — 원문 블록을 그만큼 위로 올려 전체를 제자리에 둔다 ── */
-  const TR=st.tr||{}, trTxt=(c.text2||'').trim();
+  /* 번역은 S2 트랙에서 같은 시각의 자막을 가져온다.
+     한 파일에 원문·번역이 같이 든 LRC(같은 시각 두 줄)를 넣은 경우엔 c.text2를 쓴다. */
+  const TR=st.tr||{};
+  const trClip=(()=>{ const S2=subTrack2(); if(!S2) return null;
+    return sortedClips(S2).find(x=>t>=x.start && t<clipEnd(x)) || null; })();
+  const trTxt=((trClip? trClip.text : c.text2)||'').trim();
   const trOn=TR.show!==false && !!trTxt;
   let trLines=[], trFs=0, trLineH=0, trGap=0;
   if(trOn){
@@ -7658,6 +7674,12 @@ function exportSubsFile(vtt){
 $('srtExportBtn').onclick=()=>exportSubsFile(false);
 $('vttExportBtn').onclick=()=>exportSubsFile(true);
 $('srtImportBtn').onclick=()=>$('srtFileInput').click();
+/* 가져올 자막 트랙 고르기 (자동 / S1 원문 / S2 번역) */
+$('subImpAuto').parentElement.addEventListener('click',e=>{
+  const b2=e.target.closest('[data-imp]'); if(!b2) return;
+  [...b2.parentElement.querySelectorAll('[data-imp]')].forEach(x=>x.classList.remove('on'));
+  b2.classList.add('on'); subImportTo=b2.dataset.imp;
+});
 /* LRC을 얹을 대상 곡 — 재생목록에서 고른 곡, 없으면 재생헤드가 놓인 곡.
    (곡 목록에서 곡을 누르면 그 곡 시작으로 재생헤드가 이동하므로 눌러 두면 그 곡이 잡힌다) */
 function lyricTargetSong(){
@@ -7667,6 +7689,19 @@ function lyricTargetSong(){
   const t=state.time;
   return sortedClips(tr).find(c=>t>=c.start-.001 && t<clipEnd(c)) || null;
 }
+/* 이 파일이 번역본인지 — 파일명 표시(.ko / _kor / 번역 …)를 먼저 보고,
+   없으면 본문에 한글이 얼마나 되는지로 판단한다. */
+function isTranslationFile(name, items){
+  const n=String(name||'');
+  if(/(^|[._\- ])(ko|kor|korean|kr)([._\- ]|$)/i.test(n)) return true;
+  if(/번역|한글|한국어|해석/.test(n)) return true;
+  const txt=(items||[]).slice(0,40).map(i=>i.text||'').join(' ');
+  if(!txt) return false;
+  const han=(txt.match(/[\uAC00-\uD7A3]/g)||[]).length;
+  const lat=(txt.match(/[A-Za-z]/g)||[]).length;
+  return han>0 && han>=lat;              /* 한글이 라틴 글자보다 많으면 번역본 */
+}
+let subImportTo='auto';                  /* auto | s1 | s2 — 가져올 자막 트랙 */
 /* ───────── LRC 파일 ↔ 곡 제목 맞추기 ─────────
    여러 개를 한 번에 넣을 때 어느 가사가 어느 곡인지 정해야 한다.
    파일명만 보면 「01. 아티스트 - 제목 (Official Lyric).lrc」 같은 군더더기 때문에
@@ -7738,11 +7773,14 @@ function matchLrcToSongs(files, songs){
 function applyLrcToSong(items, song, S){
   const s0=song.start, e0=clipEnd(song), sp=song.speed||1;
   const toTL=x=>s0+(x-song.in)/sp;
+  const isTr=S && S.role==='tr';
   const put=[];
   for(const it of items){
     const s=toTL(it.s), e2=toTL(it.e);
     if(e2<=s0+.05 || s>=e0-.05) continue;
-    put.push({s:Math.max(s0,s), e:Math.min(e0,e2), text:it.text, text2:it.text2||''});
+    /* 원문·번역이 한 파일에 든 LRC을 번역 트랙에 넣으면 번역 쪽을 쓴다 */
+    const txt=(isTr && it.text2)? it.text2 : it.text;
+    put.push({s:Math.max(s0,s), e:Math.min(e0,e2), text:txt, text2:isTr? '' : (it.text2||'')});
   }
   if(!put.length) return 0;
   S.clips=S.clips.filter(c=>clipEnd(c)<=s0+.02 || c.start>=e0-.02);
@@ -7752,7 +7790,7 @@ function applyLrcToSong(items, song, S){
 $('srtFileInput').addEventListener('change',async e=>{
   const files=[...(e.target.files||[])];
   if(!files.length) return;
-  const S=subTrack();
+  ensureSubTracks();
   /* ── 여러 개 또는 LRC 여러 곡분: 제목으로 곡을 찾아 각각 얹는다 ── */
   const read=[];
   for(const f of files){
@@ -7761,36 +7799,50 @@ $('srtFileInput').addEventListener('change',async e=>{
     if(!items.length){ items=parseLRC(text); kind='LRC'; }
     /* 타임코드가 없는 가사 파일도 살린다 — 곡 길이에 고르게 펼쳐 넣는다 */
     const plain=(kind==='LRC'&&!items.length)? lrcPlainLines(text) : [];
-    read.push({name:f.name, text, items, plain, kind, tag:kind==='LRC'? lrcTitleTag(text):''});
+    read.push({name:f.name, text, items, plain, kind, tag:kind==='LRC'? lrcTitleTag(text):'',
+      toTr:isTranslationFile(f.name, items.length? items : plain.map(t=>({text:t})))});
   }
+  const trackOf=r=>(subImportTo==='s1')? subTrack()
+                 : (subImportTo==='s2')? subTrack2()
+                 : (r.toTr? subTrack2() : subTrack());
+  const S=trackOf(read[0]);
   const songs=plClips().filter(c=>c.assetId&&A(c.assetId));
   const lrcs=read.filter(r=>r.kind==='LRC' && (r.items.length||r.plain.length));
   if(lrcs.length>1 || (lrcs.length===1 && files.length>1)){
     if(!songs.length){ setStatus('재생목록에 곡이 없어 곡별로 넣을 수 없습니다.'); e.target.value=''; return; }
-    const map=matchLrcToSongs(lrcs, songs);
-    if(!map.size){
+    /* 곡↔파일은 1:1로 맞추지만, 원문(S1)과 번역(S2)은 서로 다른 트랙이라
+       한 곡에 두 파일이 들어갈 수 있다. 그래서 트랙별로 따로 배정한다. */
+    const groups=new Map();
+    for(const r of lrcs){ const T=trackOf(r); if(!groups.has(T)) groups.set(T,[]); groups.get(T).push(r); }
+    let assigned=0;
+    for(const [,list] of groups) assigned+=matchLrcToSongs(list, songs).size;
+    if(!assigned){
       setStatus('가사 파일 이름·[ti:] 제목이 곡 제목과 맞지 않아 넣지 않았습니다 — 파일명을 곡 제목에 맞춰 주세요.');
       e.target.value=''; return;
     }
     pushUndo();
-    const rows=[]; let total=0;
-    lrcs.forEach((r,fi)=>{
-      const m=map.get(fi);
-      if(!m){ rows.push(`· ${r.name} → <span style="color:var(--amber)">맞는 곡 없음</span>`); return; }
-      const song=songs[m.si], a=A(song.assetId), sn=song.title||(a?a.name:'');
-      const spread=!r.items.length;
-      const use=spread? spreadLyrics(r.plain, song.in, song.dur*(song.speed||1)) : r.items;
-      const n=applyLrcToSong(use, song, S);
-      total+=n;
-      rows.push(n? `· ${r.name} → <b>${sn}</b> ${fmt(song.start)}부터 ${n}줄`
-                 + (spread? ` <span style="color:var(--amber)">(시각 없는 파일 — 곡 길이에 고르게 배분)</span>`:'')
-                 + ` <span style="color:var(--dim)">(일치 ${Math.round(m.sc*100)}%)</span>`
-                 : `· ${r.name} → <b>${sn}</b> <span style="color:var(--amber)">시각이 곡 길이 밖이라 제외</span>`);
-    });
+    const rows=[]; let total=0, songCount=0;
+    for(const [T,list] of groups){
+      const map=matchLrcToSongs(list, songs);
+      songCount=Math.max(songCount, map.size);
+      list.forEach((r,fi)=>{
+        const m=map.get(fi);
+        if(!m){ rows.push(`· ${r.name} → <span style="color:var(--amber)">맞는 곡 없음</span>`); return; }
+        const song=songs[m.si], a=A(song.assetId), sn=song.title||(a?a.name:'');
+        const spread=!r.items.length;
+        const use=spread? spreadLyrics(r.plain, song.in, song.dur*(song.speed||1)) : r.items;
+        const n=applyLrcToSong(use, song, T);
+        total+=n;
+        rows.push(n? `· ${r.name} → <b>${sn}</b> · <b style="color:var(--amber)">${T.name}</b> ${fmt(song.start)}부터 ${n}줄`
+                   + (spread? ` <span style="color:var(--amber)">(시각 없는 파일 — 곡 길이에 고르게 배분)</span>`:'')
+                   + ` <span style="color:var(--dim)">(일치 ${Math.round(m.sc*100)}%)</span>`
+                   : `· ${r.name} → <b>${sn}</b> <span style="color:var(--amber)">시각이 곡 길이 밖이라 제외</span>`);
+      });
+    }
     read.filter(r=>r.kind!=='LRC'||(!r.items.length&&!r.plain.length)).forEach(r=>
       rows.push(`· ${r.name} → <span style="color:var(--amber)">${r.items.length?'SRT/VTT라 곡별 배정 제외':'파싱 실패'}</span>`));
     renderAll();
-    setStatus(`가사 ${map.size}개 곡에 배정 · 자막 ${total}줄<br><span style="font-size:11px">${rows.join('<br>')}</span>`);
+    setStatus(`가사 ${songCount}개 곡에 배정 · 자막 ${total}줄<br><span style="font-size:11px">${rows.join('<br>')}</span>`);
     e.target.value=''; return;
   }
   /* ── 한 개만 넣은 경우 (기존 동작) ── */
@@ -9597,7 +9649,7 @@ async function loadProject(name){
       }
     }catch(e){ console.warn('에셋 로드 실패', ar.name, e); }
   }
-  state.tracks=rec.tracks;
+  state.tracks=rec.tracks; ensureSubTracks();
   for(const tr of state.tracks) for(const c of tr.clips){
     if(c.lyricsRaw!==undefined){ const a=A(c.assetId);
       c.lyrics=parseLyrics(c.lyricsRaw, a? a.duration : c.dur); }
