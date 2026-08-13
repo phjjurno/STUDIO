@@ -765,13 +765,16 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="row" id="shHookCat" style="margin-top:10px"></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
-        <textarea class="snum" id="shHookCustom" rows="2" placeholder="새 문구 — Enter로 넣기, Shift+Enter로 줄바꿈&#10;강조할 말은 (괄호)로 감싸세요" style="flex:1;min-width:0;text-align:left;padding:7px 10px;resize:vertical;line-height:1.35;font-family:inherit"></textarea>
+        <textarea class="snum" id="shHookCustom" rows="2" placeholder="새 문구 — 쓰는 대로 미리보기에 바로 보입니다&#10;Enter = 줄바꿈 · 강조할 말은 (괄호)로" style="flex:1;min-width:0;text-align:left;padding:7px 10px;resize:vertical;line-height:1.35;font-family:inherit"></textarea>
         <button class="chip" id="shHookSave" title="이 카테고리에 저장">💾 저장</button>
         <button class="chip" id="shHookAdd" title="저장하지 않고 영상에만 넣기">＋ 넣기</button>
       </div>
       <div class="row" style="margin-top:6px">
         <button class="chip" id="shHookReset" title="이 카테고리를 기본 문구로 되돌립니다">↩ 이 카테고리 기본값</button>
       </div>
+      <div class="hint2"><b>Enter</b>로 줄을 나누면 그 자리에서 갈라집니다 (비워 두면 알아서 두 줄로).
+        쓰는 동안 화면 미리보기에 그대로 보이니 줄이 어디서 나뉘는지 보고 고치세요 —
+        <b>⌘/Ctrl+Enter</b> 로 바로 넣기.</div>
       <div class="hint2">문구를 누르면 재생 헤드 위치에 들어갑니다. <b>✎</b> 수정 · <b>✕</b> 삭제 —
         고친 내용은 이 브라우저에 저장돼 다음에도 그대로 나옵니다.</div>
       </div></div>
@@ -8670,6 +8673,7 @@ function renderHooks(){
     const rm=document.createElement('button'); rm.className='mini'; rm.textContent='✕'; rm.title='문구 삭제';
     ed.onclick=()=>{
       const inp=document.createElement('textarea'); inp.className='hkedit'; inp.rows=2; inp.value=t;
+      inp.title='Enter = 줄바꿈 · ⌘/Ctrl+Enter 또는 칸 밖 클릭 = 저장 · Esc = 취소';
       inp.style.resize='vertical';
       row.replaceChild(inp,use); inp.focus(); inp.select();
       let closed=false;
@@ -8677,9 +8681,12 @@ function renderHooks(){
         const v=inp.value.replace(/\s+$/,'');
         if(ok&&v.trim()) HOOKS[hookCat][i]=v; else if(ok&&!v.trim()) HOOKS[hookCat].splice(i,1);
         saveHooks(); renderHooks(); };
+      previewHook(t);
+      inp.addEventListener('input',()=>previewHook(inp.value.replace(/\s+$/,'')));
       inp.addEventListener('keydown',e=>{
-        if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); fin(true); }   /* Shift+Enter = 줄바꿈 */
-        if(e.key==='Escape') fin(false); });
+        /* Enter 는 줄바꿈. 저장은 ⌘/Ctrl+Enter 나 칸 밖 클릭, 취소는 Esc */
+        if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); fin(true); }
+        if(e.key==='Escape'){ e.preventDefault(); fin(false); } });
       inp.addEventListener('blur',()=>fin(true));
     };
     rm.onclick=()=>{ HOOKS[hookCat].splice(i,1); saveHooks(); renderHooks(); };
@@ -8746,19 +8753,22 @@ $('shHold').addEventListener('change',e=>{
     c.dur=hookSty.hold? Math.max(1, lim-c.start) : 3; n++; }
   if(n){ renderTL(); drawNow(); }
   setStatus(hookSty.hold? '후킹 문구를 영상 끝까지 띄웁니다.' : '후킹 문구를 3초만 띄웁니다.'); });
-$('shHookSave').onclick=()=>{ const el=$('shHookCustom'); if(addHookPhrase(el.value)) el.value=''; };
+$('shHookSave').onclick=()=>{ const el=$('shHookCustom'); if(addHookPhrase(el.value)){ el.value=''; previewHook(''); } };
 $('shHookReset').onclick=()=>{
   if(!HOOKS_DEFAULT[hookCat]){ setStatus('직접 만든 카테고리라 기본값이 없습니다.'); return; }
   if(!confirm(`「${hookCat}」의 문구를 기본값으로 되돌릴까요? 이 카테고리에 직접 넣은 문구는 사라집니다.`)) return;
   HOOKS[hookCat]=HOOKS_DEFAULT[hookCat].slice(); saveHooks(); renderHooks();
   setStatus(`「${hookCat}」를 기본 문구로 되돌렸습니다.`); };
-$('shHookAdd').onclick=()=>{ const v=$('shHookCustom').value.replace(/\s+$/,''); if(v.trim()) addHookOverlay(v); };
+$('shHookAdd').onclick=()=>{ const v=$('shHookCustom').value.replace(/\s+$/,''); if(v.trim()){ previewHook(v); addHookOverlay(v); } };
+/* 치는 대로 작업 화면 미리보기에 반영 — 줄이 어디서 나뉘는지 보면서 고칠 수 있다.
+   Enter 는 줄바꿈으로 두고, 넣기는 버튼이나 ⌘/Ctrl+Enter 로 한다. */
+$('shHookCustom').addEventListener('input',e=>previewHook(e.target.value.replace(/\s+$/,'')));
+$('shHookCustom').addEventListener('focus',e=>{ if(e.target.value.trim()) previewHook(e.target.value); });
 $('shHookCustom').addEventListener('keydown',e=>{
-  if(e.key!=='Enter') return;
-  if(e.shiftKey) return;                 /* Shift+Enter = 줄바꿈 (두 줄 문구용) */
+  if(e.key!=='Enter' || !(e.metaKey||e.ctrlKey)) return;
   e.preventDefault();
   const v=e.target.value.replace(/\s+$/,''); if(!v.trim()) return;
-  addHookPhrase(v); addHookOverlay(v); e.target.value=''; });
+  addHookPhrase(v); addHookOverlay(v); e.target.value=''; previewHook(''); });
 
 /* ── 쇼츠 최적화 / 복원 ── */
 const SHORTS_KEYS=['ratio','el','titleScale','glow','titleFx','shadowOn','vignette','progressBar','subStyle','trackLabel'];
