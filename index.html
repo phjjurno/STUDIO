@@ -182,6 +182,15 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .tlClip.kvideo{background:#232E40}
 .tlClip.ksub{background:#3D3324}
 .tlClip.kover{background:#3A2740}
+.tlClip .fH{position:absolute;top:0;width:13px;height:13px;z-index:5;cursor:col-resize}
+.tlClip .fH::after{content:'';position:absolute;top:2px;width:9px;height:9px;border-radius:50%;
+  background:var(--amber);border:1.5px solid rgba(0,0,0,.5);box-shadow:0 0 0 1px rgba(255,255,255,.35)}
+.tlClip .fI{left:0}.tlClip .fI::after{left:2px}
+.tlClip .fO{right:0}.tlClip .fO::after{right:2px}
+.tlClip .fRamp{position:absolute;top:0;bottom:0;pointer-events:none;z-index:4}
+.tlClip.cutmode{cursor:crosshair}
+#tlTracks.cutmode .tlClip{cursor:crosshair}
+#tlTracks.cutmode .tlClip .hL,#tlTracks.cutmode .tlClip .hR,#tlTracks.cutmode .tlClip .fH{display:none}
 .tlClip .tzone{position:absolute;right:0;top:0;bottom:0;width:14px;background:linear-gradient(90deg,transparent,rgba(227,181,100,.5));display:none;z-index:2}
 .tlClip.hasTrans .tzone{display:block}
 #playhead{position:absolute;top:0;bottom:0;width:0;border-left:1.5px solid var(--amber);z-index:9;pointer-events:none}
@@ -704,6 +713,20 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
+      <div class="grp open"><div class="grp-h">곡 사이 전환음<span class="chev">▾</span></div><div class="grp-b">
+      <div class="row" style="gap:6px;align-items:center">
+        <button class="chip" id="tapeBtn">📼 테이프 소리 끄기</button>
+        <button class="chip" id="tapeTest">▶ 들어보기</button>
+      </div>
+      <div class="sliders">
+        <div class="slider"><label>길이 <span class="slider-rhs"><b id="tapeDurV" style="display:none">0.5</b><input type="number" class="snum" id="tapeDurN" min="15" max="200" value="50"><small class="usuf">/100초</small></span></label>
+          <input type="range" id="tapeDur" min="15" max="200" value="50"></div>
+        <div class="slider"><label>소리 크기 <span class="slider-rhs"><b id="tapeVolV" style="display:none">55%</b><input type="number" class="snum" id="tapeVolN" min="0" max="100" value="55"><small class="usuf">%</small></span></label>
+          <input type="range" id="tapeVol" min="0" max="100" value="55"></div>
+      </div>
+      <div class="hint2">곡이 바뀌는 자리마다 릴이 도는 소리를 얹습니다. 미리듣기와 내보내기에 함께 들어갑니다.</div>
+      </div></div>
+
       <div class="grp open"><div class="grp-h">자막 목록 · SRT/VTT/LRC<span class="chev">▾</span></div><div class="grp-b">
       <div class="row" style="margin-top:8px">
         <button class="chip" id="srtImportBtn">📂 SRT·VTT·LRC 가져오기 (여러 개 가능)</button>
@@ -873,6 +896,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <button id="redoBtn" title="다시 실행 (Ctrl+Y)">↪ 재실행</button>
     <span class="sep"></span>
     <button id="splitBtn" title="재생 헤드에서 분할 (S)">✂ 분할</button>
+    <button id="cutModeBtn" title="가위 — 켜고 클립을 클릭한 자리에서 자릅니다 (C)">✂️ 가위</button>
     <button id="dupBtn" title="복제">⧉ 복제</button>
     <button id="delBtn" title="삭제 (Del)">🗑 삭제</button>
     <span class="sep"></span>
@@ -2889,7 +2913,7 @@ const state = {
        lp:{x:.5,y:.5,scale:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
-  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, linkAssets:true, missingAssets:null,
+  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, dur:.5, vol:.55}, linkAssets:true, missingAssets:null,
   glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
@@ -3621,6 +3645,19 @@ function clipEl(c,tr){
   const hr=document.createElement('div'); hr.className='hR';
   const tz=document.createElement('div'); tz.className='tzone';
   d.appendChild(hl); d.appendChild(hr); d.appendChild(tz);
+  /* DAW 처럼 위쪽 모서리 손잡이를 끌어 페이드 인/아웃을 잡는다 */
+  if(tr.kind==='audio'||tr.kind==='video'){
+    const wpx=Math.max(7,c.dur*state.pxs);
+    const ramp=document.createElement('div'); ramp.className='fRamp';
+    ramp.style.left='0'; ramp.style.right='0';
+    d.appendChild(ramp);
+    const fi=document.createElement('div'); fi.className='fH fI'; fi.title='끌어서 페이드 인';
+    const fo=document.createElement('div'); fo.className='fH fO'; fo.title='끌어서 페이드 아웃';
+    d.appendChild(fi); d.appendChild(fo);
+    fi.addEventListener('pointerdown',e=>fadePointerDown(e,c,tr,d,'in'));
+    fo.addEventListener('pointerdown',e=>fadePointerDown(e,c,tr,d,'out'));
+    syncFadeUI(d,c);
+  }
   d.dataset.cid=c.id;
   d.addEventListener('pointerdown',e=>clipPointerDown(e,c,tr,d));
   return d;
@@ -3671,9 +3708,54 @@ function snapMove(ns, dur, pts){
 
 /* 클립 드래그: 이동/좌우 트리밍/트랙 이동 */
 let tlDrag=null;
+/* 페이드 삼각형과 손잡이 위치를 클립 폭에 맞춰 갱신 */
+function syncFadeUI(el,c){
+  const wpx=Math.max(7,c.dur*state.pxs);
+  const fi=el.querySelector('.fI'), fo=el.querySelector('.fO'), rp=el.querySelector('.fRamp');
+  if(!fi||!fo||!rp) return;
+  const ip=clamp((c.fadeIn||0)/Math.max(.001,c.dur),0,1)*wpx;
+  const op=clamp((c.fadeOut||0)/Math.max(.001,c.dur),0,1)*wpx;
+  fi.style.left=Math.max(0,ip-6)+'px';
+  fo.style.right=Math.max(0,op-6)+'px';
+  const gA='rgba(10,12,18,.72)', gB='rgba(10,12,18,0)';
+  const parts=[];
+  if(ip>1) parts.push(`linear-gradient(90deg, ${gA} 0, ${gB} ${ip}px, ${gB} ${ip}px) no-repeat left/${ip}px 100%`);
+  if(op>1) parts.push(`linear-gradient(270deg, ${gA} 0, ${gB} ${op}px, ${gB} ${op}px) no-repeat right/${op}px 100%`);
+  rp.style.background=parts.join(',');
+  el.title=(c.fadeIn||c.fadeOut)? `페이드 인 ${(c.fadeIn||0).toFixed(2)}s · 아웃 ${(c.fadeOut||0).toFixed(2)}s` : '';
+}
+let fadeDrag=null;
+function fadePointerDown(e,c,tr,el,which){
+  if(state.rendering) return;
+  e.preventDefault(); e.stopPropagation();
+  pushUndo();
+  fadeDrag={c,tr,el,which,x0:e.clientX,v0:(which==='in'? (c.fadeIn||0) : (c.fadeOut||0))};
+  try{ el.setPointerCapture(e.pointerId); }catch(err){}
+}
+document.addEventListener('pointermove',e=>{
+  if(!fadeDrag) return;
+  const {c,el,which,x0,v0}=fadeDrag;
+  const dt=(e.clientX-x0)/state.pxs;
+  const other=which==='in'? (c.fadeOut||0) : (c.fadeIn||0);
+  const lim=Math.max(0, c.dur-other-.02);
+  const v=clamp(which==='in'? v0+dt : v0-dt, 0, lim);
+  if(which==='in') c.fadeIn=v; else c.fadeOut=v;
+  syncFadeUI(el,c);
+  setStatus(`페이드 ${which==='in'?'인':'아웃'} ${v.toFixed(2)}초`);
+});
+document.addEventListener('pointerup',()=>{
+  if(!fadeDrag) return;
+  fadeDrag=null; propsRender(); drawNow();
+});
 function clipPointerDown(e,c,tr,el){
   if(state.rendering) return;
   e.preventDefault(); e.stopPropagation();
+  if(state.cutMode){                       /* 가위 — 누른 자리에서 자른다 */
+    const rect=el.getBoundingClientRect();
+    const t=c.start+((e.clientX-rect.left)/state.pxs);
+    cutClipAt(c,tr,t);
+    return;
+  }
   const additive=e.shiftKey||e.ctrlKey||e.metaKey;
   if(additive){                                   /* Shift/Ctrl+클릭 = 선택 토글 */
     toggleSelId(c.id); renderTL(); propsRender();
@@ -3728,6 +3810,7 @@ document.addEventListener('pointermove',e=>{
   }
   D.el.style.left=(c.start*state.pxs)+'px';
   D.el.style.width=Math.max(7,c.dur*state.pxs)+'px';
+  syncFadeUI(D.el,c);
 });
 document.addEventListener('pointerup',e=>{
   if(!tlDrag) return;
@@ -3913,7 +3996,11 @@ function splitSel(){
   }
   c.dur=off;
   c.trans={type:'none',dur:.5};   /* 분할 지점은 컷 */
-  tr.clips.push(right);
+  /* 배열에서도 바로 뒤에 끼워 넣는다. 예전엔 맨 끝에 push 해서, 재생목록 트랙에서
+     한쪽을 지우고 plRepack 이 돌면 쪼갠 조각이 맨 뒤로 밀려 순서가 통째로 어긋났다. */
+  const at=tr.clips.indexOf(c);
+  tr.clips.splice(at<0? tr.clips.length : at+1, 0, right);
+  if(tr.pl) plRepack();
   state.sel=right.id;
   renderAll();
 }
@@ -3923,7 +4010,9 @@ function dupSel(){
   const {c,tr}=s;
   const d=JSON.parse(JSON.stringify(c));
   d.id=uid(); d.start=clipEnd(c);
-  tr.clips.push(d); state.sel=d.id;
+  const ai=tr.clips.indexOf(c);
+  tr.clips.splice(ai<0? tr.clips.length : ai+1, 0, d);
+  state.sel=d.id;
   if(tr.pl) plRepack();
   renderAll();
 }
@@ -3938,6 +4027,40 @@ function delSel(){
   renderAll();
   if(n>1) setStatus(`클립 ${n}개를 삭제했습니다.`);
 }
+function syncTapeUI(){
+  const on=!!(state.tape&&state.tape.on);
+  const b=$('tapeBtn'); if(!b) return;
+  b.classList.toggle('on',on);
+  b.textContent = on? '📼 테이프 소리 켜짐' : '📼 테이프 소리 끄기';
+}
+$('tapeBtn').onclick=()=>{ state.tape.on=!state.tape.on; syncTapeUI();
+  setStatus(state.tape.on? '곡이 바뀔 때 테이프 도는 소리를 넣습니다.' : '전환음을 끕니다.'); };
+$('tapeTest').onclick=()=>{ ensureCtx(); stopSnippet();
+  const src=actx.createBufferSource(); src.buffer=tapeBuffer(actx, clamp(state.tape.dur||.5,.15,2));
+  const gn=actx.createGain(); gn.gain.value=clamp(state.tape.vol??.55,0,1);
+  src.connect(gn); gn.connect(actx.destination); src.start();
+  snippetSrc=src; };
+bindSlider('tapeDur','tapeDurV',v=>{ state.tape.dur=v/100; tapeCache.clear(); },'');
+bindSlider('tapeVol','tapeVolV',v=>state.tape.vol=v/100);
+syncTapeUI();
+/* 지정한 시각에서 클립을 자른다 (가위·분할 공통) */
+function cutClipAt(c,tr,t){
+  if(t<=c.start+.05 || t>=clipEnd(c)-.05){ setStatus('클립 안쪽을 눌러 주세요 — 양 끝은 자를 수 없습니다.'); return; }
+  setSelOne(c.id);
+  const keep=state.time; state.time=t;
+  splitSel();
+  state.time=keep;
+  setStatus(`${fmtT(t)} 에서 잘랐습니다 — 조각을 눌러 지우거나 옮기세요.`);
+}
+function syncCutUI(){
+  const b=$('cutModeBtn'); if(!b) return;
+  b.classList.toggle('on',!!state.cutMode);
+  tlTracksEl.classList.toggle('cutmode',!!state.cutMode);
+  b.textContent = state.cutMode? '✂️ 가위 켜짐' : '✂️ 가위';
+}
+$('cutModeBtn').onclick=()=>{ state.cutMode=!state.cutMode; syncCutUI();
+  setStatus(state.cutMode? '가위 켜짐 — 클립에서 자를 자리를 클릭하세요. 한 번 더 누르면 꺼집니다.' : '가위를 껐습니다.'); };
+syncCutUI();
 $('splitBtn').onclick=splitSel; $('dupBtn').onclick=dupSel; $('delBtn').onclick=delSel;
 
 /* 전체 다시 그리기 */
@@ -6340,9 +6463,66 @@ function scheduleClip(ctx, dest, c, base, t0){
   src.start(t0+lead, c.in+into*c.speed, (c.dur-into)*c.speed);
   return src;
 }
+/* ───────── 곡 넘어갈 때 테이프 도는 소리 ─────────
+   샘플 파일 없이 만든다. 릴 회전(불규칙한 저역 럼블) + 헤드 마찰(대역 잡음) +
+   핀치롤러가 물리는 순간의 짧은 클릭. 앞곡 끝에 걸쳐 0.5초. */
+const tapeCache=new Map();
+function tapeBuffer(ctx, sec){
+  const sr=ctx.sampleRate, key=sr+'|'+sec.toFixed(2);
+  if(tapeCache.has(key)) return tapeCache.get(key);
+  const n=Math.max(1,Math.round(sec*sr));
+  const buf=ctx.createBuffer(2, n, sr);
+  let lp=0, bp=0, rumbleP=0;
+  for(let i=0;i<n;i++){
+    const t=i/sr, u=i/n;
+    /* 릴이 돌기 시작해 속도가 붙는 느낌 — 살짝 흔들리는 회전음 */
+    const spin=6+18*Math.min(1,u*2.2);
+    rumbleP+=spin*(1+.06*Math.sin(t*11.3))/sr;
+    const rumble=Math.sin(rumbleP*Math.PI*2)*.30*Math.sin(Math.PI*Math.min(1,u*1.15));
+    /* 헤드·테이프 마찰 — 저역 통과시킨 잡음 */
+    const wn=Math.random()*2-1;
+    lp+=(wn-lp)*.055;                       /* 저역 */
+    bp+=((wn-lp)-bp)*.30;                   /* 중역 쪽 성분 */
+    const hiss=(lp*.9+bp*.35)*.42*(.35+.65*Math.sin(Math.PI*u));
+    /* 물리는 순간의 클릭 두 번 */
+    let clk=0;
+    for(const [ct,amp] of [[.012,.5],[.055,.28]]){
+      const d=t-ct; if(d>=0&&d<.012) clk+=Math.sin(d*2*Math.PI*1400)*amp*Math.exp(-d*260);
+    }
+    const env=Math.min(1,u*14)*Math.min(1,(1-u)*7);
+    const v=(rumble+hiss+clk)*env;
+    buf.getChannelData(0)[i]=v;
+    buf.getChannelData(1)[i]=v*.93+ (Math.random()*2-1)*.012*env;   /* 살짝 벌린 스테레오 */
+  }
+  tapeCache.set(key,buf);
+  return buf;
+}
+/* 재생목록에서 곡이 바뀌는 지점들 */
+function tapeSeams(){
+  const cs=plClips(); const out=[];
+  for(let i=1;i<cs.length;i++) out.push(cs[i].start);
+  return out;
+}
+function scheduleTape(ctx, dest, base, t0, until){
+  if(!state.tape || !state.tape.on) return;
+  const sec=clamp(state.tape.dur||.5,.15,2), vol=clamp(state.tape.vol??.55,0,1);
+  const buf=tapeBuffer(ctx, sec);
+  for(const seam of tapeSeams()){
+    const at=seam-sec*.55;                       /* 이음매에 걸치게 */
+    if(at+sec<=base) continue;
+    if(until!=null && at>=until) continue;
+    const src=ctx.createBufferSource(); src.buffer=buf;
+    const gn=ctx.createGain(); gn.gain.value=vol;
+    src.connect(gn); gn.connect(dest);
+    const lead=at-base;
+    if(lead>=0) src.start(t0+lead);
+    else src.start(t0, Math.min(sec-.001, -lead));   /* 이미 시작된 중간부터 */
+  }
+}
 async function mixAudio(sr, ch, dur){
   const off=new OfflineAudioContext(ch, Math.max(sr, Math.ceil(dur*sr)), sr);
   for(const c of audioClipsAll()) scheduleClip(off, off.destination, c, 0, 0);
+  scheduleTape(off, off.destination, 0, 0, dur);
   return off.startRendering();
 }
 /* 타임라인 [from,to] 구간만 믹싱 — 긴 영상에서 전체 버퍼 생성(메모리 초과) 방지 */
@@ -6353,6 +6533,7 @@ async function mixAudioRange(sr, ch, from, to){
     if(clipEnd(c)<=from || c.start>=to) continue;      /* 구간 밖 클립은 스킵 */
     scheduleClip(off, off.destination, c, from, 0);
   }
+  scheduleTape(off, off.destination, from, 0, to);
   return off.startRendering();
 }
 
@@ -6482,6 +6663,7 @@ function play(){
     const s=scheduleClip(actx, mixBus, c, playBase, playT0);
     if(s) playSources.push(s);
   }
+  scheduleTape(actx, mixBus, playBase, playT0, null);
   $('playBtn').textContent='⏸'; $('stopBtn').style.display='';
   rafLoop();
 }
@@ -9115,6 +9297,7 @@ document.addEventListener('keydown',e=>{
   else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey? redo():undo(); }
   else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); }
   else if(e.key.toLowerCase()==='s'&&!e.ctrlKey&&!e.metaKey){ splitSel(); }
+  else if(e.key.toLowerCase()==='c'&&!e.ctrlKey&&!e.metaKey){ $('cutModeBtn').click(); }
   else if(e.key==='ArrowLeft'){ seekTo(state.time-(e.shiftKey?1:1/30)); }
   else if(e.key==='ArrowRight'){ seekTo(state.time+(e.shiftKey?1:1/30)); }
 });
