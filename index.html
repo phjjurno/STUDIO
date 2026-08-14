@@ -130,9 +130,12 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .empty-note{color:var(--dim);font-size:12px;text-align:center;padding:8px 0}
 .tip{font-size:11.5px;color:var(--dim);line-height:1.8;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .tip b{color:var(--mist);font-weight:500}
-.proj-row{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:8px}
-.proj-row .pname{flex:1;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:8px}
+.proj-row .pname{flex:1 0 100%;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-row .pmeta{flex:1;display:flex;gap:8px;align-items:center;min-width:0}
 .proj-row .pdate{color:var(--dim);font-size:10.5px;white-space:nowrap}
+.proj-row .psize{color:var(--mist);font-size:11px;font-weight:700;white-space:nowrap}
+.proj-row .psize.link{color:#7fd6a2}
 .proj-row .tbtn{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:2px 8px;background:none;color:var(--dim);cursor:pointer;font-family:inherit}
 .proj-row .tbtn:hover{color:var(--mist);border-color:var(--mist)}
 .proj-row .pdel:hover{color:var(--danger);border-color:var(--danger)}
@@ -823,8 +826,19 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     </div>
 
     <div class="tabPane" id="tabProj">
+      <div class="row" style="gap:6px;align-items:center;margin-top:6px">
+        <button class="chip on" id="projLinkBtn" title="음원을 복사하지 않고 내 컴퓨터의 파일을 가리킵니다">🔗 링크 저장</button>
+        <button class="chip" id="projRelink" style="display:none;border-color:var(--amber);color:var(--amber)">🔗 파일 다시 연결</button>
+      </div>
+      <div class="hint2" id="projLinkNote">음원·영상을 프로젝트에 복사하지 않고 <b>내 컴퓨터의 파일 위치만</b> 저장합니다.
+        저장 용량이 거의 0이 되지만, 그 파일을 옮기거나 지우면 다시 지정해야 합니다.
+        (「미디어 추가」를 눌러 고른 파일에만 적용됩니다)</div>
+      <div class="est" id="projUsage" style="margin-top:8px"></div>
       <div class="empty-note" id="projEmpty">저장된 프로젝트가 없습니다 — 미디어·자막·타임라인·디자인이 이 기기 브라우저에 통째로 저장됩니다</div>
       <div class="tracklist" id="projList"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="chip" id="projDelAll" style="border-color:var(--danger);color:var(--danger)">전부 삭제</button>
+      </div>
     </div>
   </aside>
 
@@ -2875,7 +2889,7 @@ const state = {
        lp:{x:.5,y:.5,scale:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
-  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45,
+  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, linkAssets:true, missingAssets:null,
   glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
@@ -3185,11 +3199,37 @@ function redo(){ if(!redoStack.length) return; undoStack.push(serTracks()); appl
 
 /* ───────── 미디어 가져오기 ───────── */
 const drop=$('drop'), fileInput=$('fileInput');
-drop.addEventListener('click',()=>fileInput.click());
+const CAN_LINK = typeof window.showOpenFilePicker === 'function';
+/* 파일 선택 — 가능하면 핸들까지 받아 둔다.
+   핸들이 있으면 프로젝트에 음원을 복사하지 않고 「내 컴퓨터의 그 파일」을 가리키기만 한다. */
+drop.addEventListener('click',async()=>{
+  if(!CAN_LINK){ fileInput.click(); return; }
+  try{
+    const hs=await showOpenFilePicker({multiple:true, types:[{description:'미디어',
+      accept:{'audio/*':['.mp3','.wav','.m4a','.aac','.ogg','.flac'],
+              'video/*':['.mp4','.webm','.mov'],
+              'image/*':['.png','.jpg','.jpeg','.webp','.gif']}}]});
+    const files=[]; for(const h of hs){ const f=await h.getFile(); f.__fh=h; files.push(f); }
+    importFiles(files);
+  }catch(e){ if(e && e.name==='AbortError') return; fileInput.click(); }
+});
 fileInput.addEventListener('change',e=>importFiles(e.target.files));
 ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
-drop.addEventListener('drop',e=>importFiles(e.dataTransfer.files));
+drop.addEventListener('drop',async e=>{
+  const items=[...(e.dataTransfer.items||[])];
+  if(CAN_LINK && items.length && items[0].getAsFileSystemHandle){
+    const files=[];
+    for(const it of items){
+      if(it.kind!=='file') continue;
+      try{ const h=await it.getAsFileSystemHandle();
+        if(h && h.kind==='file'){ const f=await h.getFile(); f.__fh=h; files.push(f); continue; } }catch(err){}
+      const f=it.getAsFile(); if(f) files.push(f);
+    }
+    if(files.length){ importFiles(files); return; }
+  }
+  importFiles(e.dataTransfer.files);
+});
 
 const isAudioFile=f=>f.type.startsWith('audio/')||/\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name);
 const isVideoFile=f=>f.type.startsWith('video/')||/\.(mp4|webm|mov)$/i.test(f.name);
@@ -3216,7 +3256,7 @@ async function importFiles(fileList){
 async function importAudio(f){
   const buf=await actx.decodeAudioData(await f.arrayBuffer());
   const id=uid();
-  state.assets.set(id,{id,kind:'audio',name:cleanTitle(f.name),blob:f,duration:buf.duration,audioBuffer:buf});
+  state.assets.set(id,{id,kind:'audio',name:cleanTitle(f.name),blob:f,duration:buf.duration,audioBuffer:buf,fh:f.__fh||null});
   plAppend(id);
 }
 function firstVideoTrack(){ let vt=state.tracks.find(t=>t.kind==='video');
@@ -3232,7 +3272,7 @@ async function importVideo(f){
   await withTimeout(new Promise((res,rej)=>{ v.onloadedmetadata=res; v.onerror=()=>rej(new Error('video load')); }),15000,'영상 메타데이터 로드 실패');
   const id=uid();
   const a={id,kind:'video',name:cleanTitle(f.name),blob:f,duration:v.duration,
-    width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null};
+    width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null,fh:f.__fh||null};
   state.assets.set(id,a);
   /* 썸네일 */
   try{
@@ -9994,8 +10034,14 @@ async function saveProject(){
     /* 참조되는 에셋만 저장 */
     const used=new Set();
     for(const tr of state.tracks) for(const c of tr.clips) if(c.assetId) used.add(c.assetId);
+    /* 링크 방식이면 음원·영상을 복사하지 않고 「내 컴퓨터의 그 파일」 위치만 담는다.
+       핸들이 없는 에셋(구버전 프로젝트에서 온 것 등)만 예전처럼 통째로 담는다. */
+    const link=state.linkAssets!==false && CAN_LINK;
     const assets=[...state.assets.values()].filter(a=>used.has(a.id))
-      .map(a=>({id:a.id, kind:a.kind, name:a.name, blob:a.blob}));
+      .map(a=>(link && a.fh)
+        ? {id:a.id, kind:a.kind, name:a.name, fh:a.fh, fileName:(a.fh.name||a.name), blob:null}
+        : {id:a.id, kind:a.kind, name:a.name, blob:a.blob});
+    const linked=assets.filter(a=>a.fh).length;
     const tracks=JSON.parse(serTracks()).tracks;
     await projPut({ name, updated:Date.now(), version:3,
       design:snapshotSettings(), subStyle:{...state.subStyle},
@@ -10003,7 +10049,9 @@ async function saveProject(){
       bgImage: state.bg.type==='image'&&state.bg.file? state.bg.file : null,
       logoImage: state.logo.file||null });
     await refreshProjList();
-    setStatus(`프로젝트 「${name}」 저장 완료 — 이 기기 브라우저에 보관됩니다.`);
+    setStatus(linked
+      ? `프로젝트 「${name}」 저장 완료 — 음원 ${linked}개는 <b>복사하지 않고 내 컴퓨터 파일을 가리킵니다</b> (용량 거의 0).`
+      : `프로젝트 「${name}」 저장 완료 — 이 기기 브라우저에 보관됩니다.`);
   }catch(e){ console.error(e); setStatus('저장 실패 — 브라우저 저장 공간이 부족할 수 있습니다.'); }
 }
 async function loadProject(name){
@@ -10013,18 +10061,34 @@ async function loadProject(name){
   ensureCtx(); stopSnippet(); pause();
   setStatus(`「${name}」 불러오는 중…`);
   state.assets.clear();
+  /* 링크로 저장된 파일은 권한을 먼저 한꺼번에 받아 둔다 (클릭 직후여야 물어볼 수 있다) */
+  const missing=[];
   for(const ar of rec.assets){
+    if(!ar.fh || ar.blob) continue;
+    try{
+      let st=await ar.fh.queryPermission({mode:'read'});
+      if(st!=='granted') st=await ar.fh.requestPermission({mode:'read'});
+      if(st!=='granted'){ missing.push(ar); continue; }
+      ar.blob=await ar.fh.getFile();          /* 실제 바이트는 여기서 디스크에서 읽는다 */
+    }catch(e){ console.warn('링크 파일 열기 실패', ar.name, e); missing.push(ar); }
+  }
+  for(const ar of rec.assets){
+    if(!ar.blob){                              /* 못 찾은 파일 — 자리만 만들어 둔다 */
+      state.assets.set(ar.id,{id:ar.id,kind:ar.kind,name:ar.name,blob:null,
+        duration:0,audioBuffer:null,fh:ar.fh||null,missingFile:true});
+      continue;
+    }
     try{
       if(ar.kind==='audio'){
         const buf=await actx.decodeAudioData(await ar.blob.arrayBuffer());
-        state.assets.set(ar.id,{id:ar.id,kind:'audio',name:ar.name,blob:ar.blob,duration:buf.duration,audioBuffer:buf});
+        state.assets.set(ar.id,{id:ar.id,kind:'audio',name:ar.name,blob:ar.blob,duration:buf.duration,audioBuffer:buf,fh:ar.fh||null});
       }else if(ar.kind==='video'){
         const url=URL.createObjectURL(ar.blob);
         const v=document.createElement('video');
         v.muted=true; v.playsInline=true; v.preload='auto'; v.src=url;
         await withTimeout(new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej;}),15000,'video load');
         const a={id:ar.id,kind:'video',name:ar.name,blob:ar.blob,duration:v.duration,
-          width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null};
+          width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null,fh:ar.fh||null};
         try{ await seekVideo(v,Math.min(.5,v.duration/2));
           const tc=document.createElement('canvas'); tc.width=120;
           tc.height=Math.max(1,Math.round(120*v.videoHeight/Math.max(1,v.videoWidth)));
@@ -10062,7 +10126,34 @@ async function loadProject(name){
   undoStack.length=0; redoStack.length=0;
   syncUIFromState(); renderAll();
   $('projName').value=name;
-  setStatus(`프로젝트 「${name}」 불러오기 완료 — 총 ${fmt(tlDuration())}`);
+  if(missing.length){
+    state.missingAssets=missing.map(m=>m.id);
+    setStatus(`「${name}」 불러왔지만 파일 ${missing.length}개를 찾지 못했습니다 — `
+      +`${missing.map(m=>m.name).slice(0,3).join(', ')}${missing.length>3?' 외':''}. `
+      +`파일을 옮겼거나 권한을 거절한 경우입니다. <b>프로젝트 탭 → 🔗 파일 다시 연결</b> 로 다시 지정하세요.`);
+    $('projRelink').style.display='';
+  }else{
+    state.missingAssets=null; $('projRelink').style.display='none';
+    setStatus(`프로젝트 「${name}」 불러오기 완료 — 총 ${fmt(tlDuration())}`);
+  }
+}
+const fmtBytes=n=>{ n=n||0;
+  if(n<1024) return n+' B';
+  if(n<1048576) return (n/1024).toFixed(0)+' KB';
+  if(n<1073741824) return (n/1048576).toFixed(n<10485760?1:0)+' MB';
+  return (n/1073741824).toFixed(2)+' GB'; };
+/* 프로젝트가 실제로 차지하는 용량 — 담긴 파일 크기의 합.
+   링크로 저장된 것은 파일을 복사하지 않으므로 여기에 잡히지 않는다. */
+function projSize(p){
+  let bytes=0, linked=0;
+  for(const a of (p.assets||[])){
+    if(a.blob&&a.blob.size) bytes+=a.blob.size;
+    else if(a.fh) linked++;
+  }
+  if(p.bgImage&&p.bgImage.size) bytes+=p.bgImage.size;
+  if(p.logoImage&&p.logoImage.size) bytes+=p.logoImage.size;
+  try{ bytes+=JSON.stringify(p.tracks||[]).length; }catch(e){}
+  return {bytes, linked};
 }
 async function refreshProjList(){
   const list=$('projList'); list.innerHTML='';
@@ -10070,21 +10161,79 @@ async function refreshProjList(){
   try{ all=await projAll(); }catch(e){}
   all.sort((a,b)=>b.updated-a.updated);
   $('projEmpty').style.display=all.length? 'none':'block';
+  let total=0, totalLinked=0;
   for(const p of all){
+    const {bytes,linked}=projSize(p); total+=bytes; totalLinked+=linked;
     const row=document.createElement('div'); row.className='proj-row';
     const d=new Date(p.updated);
     const ds=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     const legacy=p.version!==3;
     row.innerHTML=`<span class="pname">📁 ${p.name}${legacy?' <span style="color:var(--dim);font-size:10px">(v2)</span>':''}</span>
-      <span class="pdate">${ds}</span>
+      <span class="pmeta">
+        <span class="psize${linked?' link':''}" title="${linked? linked+'개 파일은 링크(복사 안 함)':'프로젝트에 담긴 파일 용량'}">${linked&&bytes<200000? '🔗 링크' : fmtBytes(bytes)}</span>
+        <span class="pdate">${ds}</span>
+      </span>
       <button class="tbtn pload"${legacy?' disabled':''}>불러오기</button><button class="tbtn pdel">삭제</button>`;
     row.querySelector('.pload').onclick=()=>loadProject(p.name);
     row.querySelector('.pdel').onclick=async()=>{
-      if(confirm(`「${p.name}」 프로젝트를 삭제할까요?`)){ await projDel(p.name); refreshProjList(); }
+      if(confirm(`「${p.name}」 프로젝트를 삭제할까요?\n담긴 파일 ${fmtBytes(bytes)} 이 함께 지워집니다. (원본 파일은 그대로입니다)`)){
+        await projDel(p.name); refreshProjList(); }
     };
     list.appendChild(row);
   }
+  let usage='';
+  try{ const est=await navigator.storage.estimate();
+    usage=` · 이 사이트가 브라우저에서 쓰는 전체 <b>${fmtBytes(est.usage)}</b>`
+         + (est.quota? ` / 허용 ${fmtBytes(est.quota)}`:''); }catch(e){}
+  $('projUsage').innerHTML = all.length
+    ? `프로젝트 <b>${all.length}개</b> · 담긴 파일 합계 <b style="color:var(--mist)">${fmtBytes(total)}</b>`
+      + (totalLinked? ` · 링크로 걸린 파일 <b style="color:#7fd6a2">${totalLinked}개</b>(복사 안 함)`:'')
+      + usage
+    : `저장된 프로젝트 없음${usage}`;
+  $('projDelAll').style.display=all.length? '':'none';
 }
+$('projLinkBtn').onclick=()=>{
+  if(!CAN_LINK){ setStatus('이 브라우저는 파일 링크를 지원하지 않습니다 — Chrome·Edge에서 쓸 수 있어요.'); return; }
+  state.linkAssets=!(state.linkAssets!==false);
+  $('projLinkBtn').classList.toggle('on', state.linkAssets!==false);
+  setStatus(state.linkAssets!==false
+    ? '링크 저장 — 음원을 복사하지 않고 내 컴퓨터 파일을 가리킵니다.'
+    : '복사 저장 — 음원을 프로젝트 안에 통째로 담습니다 (파일을 옮겨도 열립니다).');
+};
+/* 링크가 끊긴 파일을 다시 지정 */
+$('projRelink').onclick=async()=>{
+  const ids=state.missingAssets||[];
+  if(!ids.length||!CAN_LINK) return;
+  for(const id of ids){
+    const a=A(id); if(!a||!a.missingFile) continue;
+    let hs;
+    try{ hs=await showOpenFilePicker({multiple:false}); }catch(e){ return; }
+    const fh=hs[0]; const f=await fh.getFile();
+    try{
+      if(a.kind==='audio'){
+        const buf=await actx.decodeAudioData(await f.arrayBuffer());
+        Object.assign(a,{blob:f,fh,duration:buf.duration,audioBuffer:buf,missingFile:false,name:cleanTitle(f.name)});
+      }else{
+        const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.src=URL.createObjectURL(f);
+        await withTimeout(new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej;}),15000,'video load');
+        Object.assign(a,{blob:f,fh,duration:v.duration,videoEl:v,width:v.videoWidth,height:v.videoHeight,missingFile:false});
+      }
+    }catch(e){ setStatus(`「${f.name}」 을 읽지 못했습니다.`); }
+  }
+  state.missingAssets=(state.missingAssets||[]).filter(id=>{ const a=A(id); return a&&a.missingFile; });
+  if(!state.missingAssets.length){ $('projRelink').style.display='none';
+    setStatus('파일을 다시 연결했습니다 — 저장해 두면 다음에도 그대로 열립니다.'); }
+  renderAll();
+};
+$('projDelAll').onclick=async()=>{
+  let all=[]; try{ all=await projAll(); }catch(e){}
+  if(!all.length) return;
+  let total=0; for(const p of all) total+=projSize(p).bytes;
+  if(!confirm(`저장된 프로젝트 ${all.length}개를 모두 지울까요?\n브라우저에서 ${fmtBytes(total)} 이 비워집니다.\n원본 음원·영상 파일은 그대로 남습니다.`)) return;
+  for(const p of all) await projDel(p.name);
+  await refreshProjList();
+  setStatus(`프로젝트 ${all.length}개를 삭제했습니다 — ${fmtBytes(total)} 확보.`);
+};
 $('projSave').addEventListener('click',saveProject);
 
 /* ═══════ 유튜브 타임스탬프 ═══════ */
