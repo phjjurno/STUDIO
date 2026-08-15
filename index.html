@@ -6494,9 +6494,13 @@ function scheduleClip(ctx, dest, c, base, t0){
   return src;
 }
 /* ───────── 곡 넘어갈 때 카세트 소리 ─────────
-   샘플 파일 없이 합성한다. ① 카세트를 밀어 넣는 '척-컹'(도어 슬라이드 잡음 +
-   케이스가 안착하는 저역 텅) ② 재생 버튼을 누르는 묵직한 '딸깍'(스프링 클릭 +
-   기계식 래치) ③ 눌린 직후 모터가 도는 짧은 히스. 기본 0.6초. */
+   샘플 없이 합성하되 최대한 아날로그로. 딱딱한 디지털 클릭 대신
+   ① 플라스틱 케이스가 슬롯에 스치는 마찰(대역 제한 잡음)
+   ② 케이스가 안착하는 '컹' — 비화성 배음 몇 개를 감쇠시켜 몸통 울림을 만든다
+   ③ 재생 버튼 래치 '딸깍' — 스프링이 두 단으로 걸리는 소리
+   ④ 모터 스타트 — 미세한 워우(피치 흔들림)가 실린 히스
+   마지막에 1극 저역통과 두 번 + 테이프 새츄레이션 + 바닥 히스를 얹어
+   전체를 부드럽게 만다. */
 const tapeCache=new Map();
 function tapeBuffer(ctx, sec){
   const sr=ctx.sampleRate, key=sr+'|'+sec.toFixed(2);
@@ -6504,42 +6508,75 @@ function tapeBuffer(ctx, sec){
   const n=Math.max(1,Math.round(sec*sr));
   const buf=ctx.createBuffer(2, n, sr);
   const L=buf.getChannelData(0), Rc=buf.getChannelData(1);
-  const T=(f)=>Math.round(f*sec*sr);            /* 구간 비율 → 샘플 위치 */
-  /* 이벤트 시각(전체 길이에 비례): 삽입 0~28% · 안착 28% · 버튼 55% · 모터 60%~ */
-  const tIns0=0, tIns1=T(.26), tSeat=T(.28), tBtn=T(.55), tMot=T(.60);
-  let lp=0, lp2=0;
-  const thud=(i,at,f0,amp,dec)=>{ const d=(i-at)/sr; return d<0?0:Math.sin(d*2*Math.PI*f0*(1-d*2))*amp*Math.exp(-d*dec); };
-  const click=(i,at,f0,amp,dec)=>{ const d=(i-at)/sr; return d<0?0:((Math.random()*2-1)*.5+Math.sin(d*2*Math.PI*f0))*amp*Math.exp(-d*dec); };
+  const P=f=>Math.round(f*n);
+  const tIns0=0, tIns1=P(.30), tSeat=P(.30), tBtn=P(.58), tMot=P(.62);
+
+  /* 몸통 울림 — 비화성 배음을 감쇠시켜 플라스틱·금속의 '통' 소리를 만든다 */
+  const body=(d,parts)=>{ let v=0;
+    for(const [f,amp,dec] of parts) v+=Math.sin(d*2*Math.PI*f)*amp*Math.exp(-d*dec);
+    return v; };
+
+  const raw=new Float32Array(n);
+  let lpA=0, lpB=0, wow=0;
   for(let i=0;i<n;i++){
+    const t=i/sr;
     let v=0;
-    /* ① 카세트가 슬롯을 스치며 들어가는 잡음 — 저역 통과, 점점 커짐 */
-    if(i>=tIns0&&i<tIns1){
-      const u=(i-tIns0)/Math.max(1,tIns1-tIns0);
-      const wn=Math.random()*2-1; lp+=(wn-lp)*.09;
-      v+=lp*.55*(0.25+0.75*u)*Math.sin(Math.PI*Math.min(1,u*1.6));
+    /* ① 슬롯 마찰 — 저역만 남긴 잡음, 밀어 넣는 동안 서서히 */
+    if(i<tIns1){
+      const u=i/Math.max(1,tIns1);
+      const wn=Math.random()*2-1; lpA+=(wn-lpA)*.055;
+      v+=lpA*.42*Math.sin(Math.PI*u)*(0.3+0.7*u);
     }
-    /* 케이스 안착 '컹' — 저역 텅 + 짧은 덜컥 */
-    v+=thud(i,tSeat,95,.9,34)+click(i,tSeat,900,.28,150);
-    /* ② 재생 버튼 '딸깍' — 눌림 클릭 + 스프링 래치(두 단) */
-    v+=click(i,tBtn,1500,.55,220)+thud(i,tBtn,140,.75,40);
-    v+=click(i,tBtn+Math.round(.028*sr),1100,.34,180);   /* 래치가 걸리는 2차 딸깍 */
-    /* ③ 모터 스타트 — 짧은 히스가 차오르다 페이드 */
+    /* ② 안착 '컹' — 낮은 몸통 + 살짝 위 배음 */
+    { const d=(i-tSeat)/sr;
+      if(d>=0&&d<.35) v+=body(d,[[64,.55,17],[97,.30,24],[173,.16,40],[318,.07,70]]); }
+    /* ③ 버튼 래치 — 두 단으로 걸리는 소리, 각각 짧은 몸통 울림 */
+    { const d=(i-tBtn)/sr;
+      if(d>=0&&d<.22) v+=body(d,[[520,.30,95],[880,.20,140],[132,.42,30]]); }
+    { const d=(i-tBtn-Math.round(.034*sr))/sr;
+      if(d>=0&&d<.18) v+=body(d,[[430,.20,120],[1150,.11,190],[110,.22,38]]); }
+    /* ④ 모터 스타트 — 워우가 실린 히스 + 아주 낮은 회전음 */
     if(i>=tMot){
       const u=(i-tMot)/Math.max(1,n-tMot);
-      const wn=Math.random()*2-1; lp2+=(wn-lp2)*.06;
-      v+=lp2*.30*Math.min(1,u*5)*(1-u*.55) + Math.sin(i/sr*2*Math.PI*52)*.05*Math.min(1,u*4)*(1-u);
+      const wn=Math.random()*2-1; lpB+=(wn-lpB)*.045;
+      wow+=(3.1+.9*Math.sin(t*7.7))/sr;                 /* 느린 피치 흔들림 */
+      v+=lpB*.26*Math.min(1,u*4)*(1-u*.6);
+      v+=Math.sin(wow*2*Math.PI*14)*.06*Math.min(1,u*3)*(1-u*.7);
     }
-    const env=Math.min(1,i/(sr*.004))*Math.min(1,(n-i)/(sr*.05));
-    v=Math.tanh(v*1.05)*.82*env;               /* 소프트 클립 — 피크를 1 아래로, 질감은 뭉툭하게 */
-    L[i]=v; Rc[i]=v*.94+(Math.random()*2-1)*.01*env;
+    /* 바닥 히스 — 아주 작게 깔아 두면 합성 티가 덜 난다 */
+    v+=(Math.random()*2-1)*.008;
+    raw[i]=v;
+  }
+  /* 저역통과 두 번 — 디지털한 잔가시를 걷어낸다 */
+  let f1=0, f2=0;
+  const k=Math.min(.5, 2600/sr*2.2);
+  for(let i=0;i<n;i++){ f1+=(raw[i]-f1)*k; f2+=(f1-f2)*k; raw[i]=f2*1.9; }
+  /* 새츄레이션 + 앞뒤 자연스러운 여닫이 */
+  for(let i=0;i<n;i++){
+    const env=Math.min(1,i/(sr*.012))*Math.min(1,(n-i)/(sr*.08));
+    const v=Math.tanh(raw[i]*1.6)*.78*env;
+    L[i]=v;
+    Rc[i]=v*.92+(Math.random()*2-1)*.006*env;            /* 살짝 벌린 스테레오 */
   }
   tapeCache.set(key,buf);
   return buf;
 }
-/* 재생목록에서 곡이 바뀌는 지점들 */
+/* 곡이 '진짜로' 바뀌는 지점만 고른다.
+   가위로 자르거나 복제하면 재생목록 클립 수만 늘어날 뿐 곡은 그대로다.
+   예전엔 클립 경계마다 소리를 넣어 한 곡 안에서도 계속 울렸다. */
 function tapeSeams(){
   const cs=plClips(); const out=[];
-  for(let i=1;i<cs.length;i++) out.push(cs[i].start);
+  const sec=clamp((state.tape&&state.tape.dur)||.6,.15,2);
+  for(let i=1;i<cs.length;i++){
+    const prev=cs[i-1], cur=cs[i];
+    if(prev.assetId && prev.assetId===cur.assetId){
+      /* 같은 음원 — 소스 시각이 그대로 이어지면 잘라 놓은 한 곡이다 */
+      const contIn=Math.abs((prev.in||0)+prev.dur*(prev.speed||1)-(cur.in||0))<.35;
+      if(contIn) continue;
+    }
+    if(out.length && cur.start-out[out.length-1] < sec*1.5) continue;   /* 너무 붙은 경계는 한 번만 */
+    out.push(cur.start);
+  }
   return out;
 }
 function scheduleTape(ctx, dest, base, t0, until){
