@@ -300,6 +300,19 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="tracklist" id="tracklist"></div>
       <div class="empty-note" id="emptyNote">아직 추가된 곡이 없습니다</div>
 
+
+      <div class="opt-label">곡 사이 전환음</div>
+      <div class="row" style="gap:6px;align-items:center">
+        <button class="chip" id="tapeBtn">📼 전환음 켜기</button>
+        <button class="chip" id="tapeTest">▶ 들어보기</button>
+      </div>
+      <div class="sliders">
+        <div class="slider"><label>길이 <span class="slider-rhs"><b id="tapeDurV" style="display:none">0.5</b><input type="number" class="snum" id="tapeDurN" min="30" max="200" value="60"><small class="usuf">/100초</small></span></label>
+          <input type="range" id="tapeDur" min="30" max="200" value="60"></div>
+        <div class="slider"><label>소리 크기 <span class="slider-rhs"><b id="tapeVolV" style="display:none">55%</b><input type="number" class="snum" id="tapeVolN" min="0" max="100" value="55"><small class="usuf">%</small></span></label>
+          <input type="range" id="tapeVol" min="0" max="100" value="55"></div>
+      </div>
+      <div class="hint2">곡이 바뀌는 자리마다 <b>카세트를 넣고 재생 버튼을 누르는 소리</b>를 얹습니다. 미리듣기와 내보내기에 함께 들어갑니다.</div>
       <div class="opt-label">유튜브 타임스탬프 (설명란용)</div>
       <div class="row">
         <button class="chip" id="tsBtn">타임스탬프 만들기</button>
@@ -718,20 +731,6 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <div class="slider"><label>원문과 간격 <span class="slider-rhs"><input type="number" class="snum" id="subTrGapN" min="0" max="120" value="34"><small class="usuf">%</small></span></label>
           <input type="range" id="subTrGap" min="0" max="120" value="34"></div>
       </div>
-      </div></div>
-
-      <div class="grp open"><div class="grp-h">곡 사이 전환음<span class="chev">▾</span></div><div class="grp-b">
-      <div class="row" style="gap:6px;align-items:center">
-        <button class="chip" id="tapeBtn">📼 테이프 소리 끄기</button>
-        <button class="chip" id="tapeTest">▶ 들어보기</button>
-      </div>
-      <div class="sliders">
-        <div class="slider"><label>길이 <span class="slider-rhs"><b id="tapeDurV" style="display:none">0.5</b><input type="number" class="snum" id="tapeDurN" min="15" max="200" value="50"><small class="usuf">/100초</small></span></label>
-          <input type="range" id="tapeDur" min="15" max="200" value="50"></div>
-        <div class="slider"><label>소리 크기 <span class="slider-rhs"><b id="tapeVolV" style="display:none">55%</b><input type="number" class="snum" id="tapeVolN" min="0" max="100" value="55"><small class="usuf">%</small></span></label>
-          <input type="range" id="tapeVol" min="0" max="100" value="55"></div>
-      </div>
-      <div class="hint2">곡이 바뀌는 자리마다 릴이 도는 소리를 얹습니다. 미리듣기와 내보내기에 함께 들어갑니다.</div>
       </div></div>
 
       <div class="grp open"><div class="grp-h">자막 목록 · SRT/VTT/LRC<span class="chev">▾</span></div><div class="grp-b">
@@ -2920,7 +2919,7 @@ const state = {
        lp:{x:.5,y:.5,scale:1,opacity:1,bright:1,con:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
-  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, dur:.5, vol:.55}, linkAssets:true, missingAssets:null,
+  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, dur:.6, vol:.55}, linkAssets:true, missingAssets:null,
   glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
@@ -4062,7 +4061,7 @@ function syncTapeUI(){
   const on=!!(state.tape&&state.tape.on);
   const b=$('tapeBtn'); if(!b) return;
   b.classList.toggle('on',on);
-  b.textContent = on? '📼 테이프 소리 켜짐' : '📼 테이프 소리 끄기';
+  b.textContent = on? '📼 전환음 켜짐' : '📼 전환음 켜기';
 }
 $('tapeBtn').onclick=()=>{ state.tape.on=!state.tape.on; syncTapeUI();
   setStatus(state.tape.on? '곡이 바뀔 때 테이프 도는 소리를 넣습니다.' : '전환음을 끕니다.'); };
@@ -6494,36 +6493,45 @@ function scheduleClip(ctx, dest, c, base, t0){
   src.start(t0+lead, c.in+into*c.speed, (c.dur-into)*c.speed);
   return src;
 }
-/* ───────── 곡 넘어갈 때 테이프 도는 소리 ─────────
-   샘플 파일 없이 만든다. 릴 회전(불규칙한 저역 럼블) + 헤드 마찰(대역 잡음) +
-   핀치롤러가 물리는 순간의 짧은 클릭. 앞곡 끝에 걸쳐 0.5초. */
+/* ───────── 곡 넘어갈 때 카세트 소리 ─────────
+   샘플 파일 없이 합성한다. ① 카세트를 밀어 넣는 '척-컹'(도어 슬라이드 잡음 +
+   케이스가 안착하는 저역 텅) ② 재생 버튼을 누르는 묵직한 '딸깍'(스프링 클릭 +
+   기계식 래치) ③ 눌린 직후 모터가 도는 짧은 히스. 기본 0.6초. */
 const tapeCache=new Map();
 function tapeBuffer(ctx, sec){
   const sr=ctx.sampleRate, key=sr+'|'+sec.toFixed(2);
   if(tapeCache.has(key)) return tapeCache.get(key);
   const n=Math.max(1,Math.round(sec*sr));
   const buf=ctx.createBuffer(2, n, sr);
-  let lp=0, bp=0, rumbleP=0;
+  const L=buf.getChannelData(0), Rc=buf.getChannelData(1);
+  const T=(f)=>Math.round(f*sec*sr);            /* 구간 비율 → 샘플 위치 */
+  /* 이벤트 시각(전체 길이에 비례): 삽입 0~28% · 안착 28% · 버튼 55% · 모터 60%~ */
+  const tIns0=0, tIns1=T(.26), tSeat=T(.28), tBtn=T(.55), tMot=T(.60);
+  let lp=0, lp2=0;
+  const thud=(i,at,f0,amp,dec)=>{ const d=(i-at)/sr; return d<0?0:Math.sin(d*2*Math.PI*f0*(1-d*2))*amp*Math.exp(-d*dec); };
+  const click=(i,at,f0,amp,dec)=>{ const d=(i-at)/sr; return d<0?0:((Math.random()*2-1)*.5+Math.sin(d*2*Math.PI*f0))*amp*Math.exp(-d*dec); };
   for(let i=0;i<n;i++){
-    const t=i/sr, u=i/n;
-    /* 릴이 돌기 시작해 속도가 붙는 느낌 — 살짝 흔들리는 회전음 */
-    const spin=6+18*Math.min(1,u*2.2);
-    rumbleP+=spin*(1+.06*Math.sin(t*11.3))/sr;
-    const rumble=Math.sin(rumbleP*Math.PI*2)*.30*Math.sin(Math.PI*Math.min(1,u*1.15));
-    /* 헤드·테이프 마찰 — 저역 통과시킨 잡음 */
-    const wn=Math.random()*2-1;
-    lp+=(wn-lp)*.055;                       /* 저역 */
-    bp+=((wn-lp)-bp)*.30;                   /* 중역 쪽 성분 */
-    const hiss=(lp*.9+bp*.35)*.42*(.35+.65*Math.sin(Math.PI*u));
-    /* 물리는 순간의 클릭 두 번 */
-    let clk=0;
-    for(const [ct,amp] of [[.012,.5],[.055,.28]]){
-      const d=t-ct; if(d>=0&&d<.012) clk+=Math.sin(d*2*Math.PI*1400)*amp*Math.exp(-d*260);
+    let v=0;
+    /* ① 카세트가 슬롯을 스치며 들어가는 잡음 — 저역 통과, 점점 커짐 */
+    if(i>=tIns0&&i<tIns1){
+      const u=(i-tIns0)/Math.max(1,tIns1-tIns0);
+      const wn=Math.random()*2-1; lp+=(wn-lp)*.09;
+      v+=lp*.55*(0.25+0.75*u)*Math.sin(Math.PI*Math.min(1,u*1.6));
     }
-    const env=Math.min(1,u*14)*Math.min(1,(1-u)*7);
-    const v=(rumble+hiss+clk)*env;
-    buf.getChannelData(0)[i]=v;
-    buf.getChannelData(1)[i]=v*.93+ (Math.random()*2-1)*.012*env;   /* 살짝 벌린 스테레오 */
+    /* 케이스 안착 '컹' — 저역 텅 + 짧은 덜컥 */
+    v+=thud(i,tSeat,95,.9,34)+click(i,tSeat,900,.28,150);
+    /* ② 재생 버튼 '딸깍' — 눌림 클릭 + 스프링 래치(두 단) */
+    v+=click(i,tBtn,1500,.55,220)+thud(i,tBtn,140,.75,40);
+    v+=click(i,tBtn+Math.round(.028*sr),1100,.34,180);   /* 래치가 걸리는 2차 딸깍 */
+    /* ③ 모터 스타트 — 짧은 히스가 차오르다 페이드 */
+    if(i>=tMot){
+      const u=(i-tMot)/Math.max(1,n-tMot);
+      const wn=Math.random()*2-1; lp2+=(wn-lp2)*.06;
+      v+=lp2*.30*Math.min(1,u*5)*(1-u*.55) + Math.sin(i/sr*2*Math.PI*52)*.05*Math.min(1,u*4)*(1-u);
+    }
+    const env=Math.min(1,i/(sr*.004))*Math.min(1,(n-i)/(sr*.05));
+    v=Math.tanh(v*1.05)*.82*env;               /* 소프트 클립 — 피크를 1 아래로, 질감은 뭉툭하게 */
+    L[i]=v; Rc[i]=v*.94+(Math.random()*2-1)*.01*env;
   }
   tapeCache.set(key,buf);
   return buf;
@@ -6539,7 +6547,7 @@ function scheduleTape(ctx, dest, base, t0, until){
   const sec=clamp(state.tape.dur||.5,.15,2), vol=clamp(state.tape.vol??.55,0,1);
   const buf=tapeBuffer(ctx, sec);
   for(const seam of tapeSeams()){
-    const at=seam-sec*.55;                       /* 이음매에 걸치게 */
+    const at=seam-sec*.62;                       /* 딸깍이 곡 시작 직전에 오도록 */
     if(at+sec<=base) continue;
     if(until!=null && at>=until) continue;
     const src=ctx.createBufferSource(); src.buffer=buf;
@@ -6580,20 +6588,26 @@ function clipVisibleEnd(c,tr){
   return clipEnd(c)+(nxt&&c.trans&&c.trans.type!=='none'? Math.min(c.trans.dur,nxt.dur):0);
 }
 function syncVideos(t, playing){
+  /* 복사·분할로 한 소스를 여러 컷이 쓰면 컷마다 제어할 때 서로 싸운다 —
+     비활성 컷이 매번 pause 를 걸고, 두 컷이 서로 다른 currentTime 을 대입해
+     둘 다 재생이 널뛰었다. 내보내기(advanceVideosTo)와 같은 방식으로
+     소스 하나당 '지금 그려질 컷' 한 개만 골라 제어한다. */
+  const act=new Map();
   eachVideoClip((c,tr,a)=>{
-    const v=a.videoEl;
-    const act = t>=c.start-.35 && t<clipVisibleEnd(c,tr);
-    if(act){
-      const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
-      if(playing){
-        v.playbackRate=clamp(c.speed,.25,4);
-        if(v.paused){ v.currentTime=st; v.play().catch(()=>{}); }
-        else if(Math.abs(v.currentTime-st)>.3) v.currentTime=st;
-      }else{
-        if(!v.paused) v.pause();
-      }
-    }else if(!v.paused) v.pause();
+    if(!(t>=c.start-.35 && t<clipVisibleEnd(c,tr))) return;
+    const prev=act.get(a);
+    if(!prev || c.start>prev.start) act.set(a,c);
   });
+  eachVideoClip((c,tr,a)=>{ if(!act.has(a) && !a.videoEl.paused) a.videoEl.pause(); });
+  for(const [a,c] of act){
+    const v=a.videoEl;
+    const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
+    if(playing){
+      v.playbackRate=clamp(c.speed,.25,4);
+      if(v.paused){ v.currentTime=st; v.play().catch(()=>{}); }
+      else if(Math.abs(v.currentTime-st)>.3) v.currentTime=st;
+    }else if(!v.paused) v.pause();
+  }
 }
 function pauseAllVideos(){ eachVideoClip((c,tr,a)=>{ if(!a.videoEl.paused) a.videoEl.pause(); }); }
 async function seekVideosAt(t){
@@ -6616,6 +6630,13 @@ async function seekVideosAt(t){
 /* 소스가 목표보다 이만큼 앞서면 정지시킨다. 이 폭이 그대로 프레임 오차(영상이
    오디오보다 앞서는 양)의 상한이 되므로 한 프레임 남짓으로 좁게 잡는다. */
 const VID_AHEAD_MAX=.022;
+/* 이보다 많이 앞질러 버리면 정지만으로는 못 돌아온다 — 그 프레임은 '미래 장면'이라
+   결과물이 튄다. 이때만 탐색 1회로 되돌린다(드물게 일어나므로 속도 손해는 미미). */
+/* 앞질러 버린 폭이 이보다 크면 정지만으로 못 돌아온다 → 탐색 1회로 되돌린다 */
+const VID_BEHIND_MAX=.10;
+/* 목표 시각에 도달한 뒤에도 이만큼 어긋나 있으면 그 자리에서 바로잡는다 (약 2프레임) */
+const VID_FIX_TOL=.07;
+const VID_RATE_MAX=8;
 /* 내보내기가 실제로 소모하는 속도(소스 초/실시간 초)를 추정해 재생 배속을 맞춘다.
    잔여 오차만 보고 배속을 정하면 거의 따라잡았을 때 배속이 0.5까지 떨어져
    정작 필요한 처리량에 못 미친다(실측 평균 0.81배 → 4K60이 0.53배속). */
@@ -6670,13 +6691,26 @@ async function advanceVideosTo(t){
     }
     /* 많이 앞섰으면 정지해 따라오기를 기다린다. 감속만 하면 내보내기가 실시간보다
        느릴 때 소스가 계속 앞질러 매 프레임 재탐색이 일어난다(초기 구현의 실패 원인). */
+    if(drift <= -VID_BEHIND_MAX){          /* 크게 앞질렀다 → 되돌려 맞춘다 */
+      if(!v.paused) v.pause();
+      waits.push(seekVideo(v,st));
+      continue;
+    }
     if(drift <= -VID_AHEAD_MAX){ if(!v.paused) v.pause(); continue; }
     if(drift <= 0) continue;                /* 조금 앞섬 — 그 프레임을 그대로 쓴다 */
-    /* 필요 처리량(추정)에 1.5배 여유만 준다. 더 높이면 한 프레임 그리는 동안
-       크게 앞질러 오차가 커지고, 낮으면 매 프레임 기다리게 된다. */
-    v.playbackRate=clamp(pace*1.5*clamp(c.speed,.25,4), .5, 8);
+    /* 필요 처리량(추정)에 여유를 주되 상한을 낮게 잡는다. 8배까지 열어 두면 한 프레임
+       그리는 동안 소스가 몇 초씩 앞질러 버려(실측 1.97초) 미래 장면이 찍혔다. */
+    v.playbackRate=clamp(pace*1.35*clamp(c.speed,.25,4), .5, VID_RATE_MAX);
     if(v.paused) v.play().catch(()=>{ a.noPlay=true; });   /* 재생이 막히면 탐색 방식으로 복귀 */
-    waits.push(waitVideoTime(v, st, 400));
+    /* 타임아웃되면 그냥 이전 프레임을 쓰고 넘어갔었다 — 소스가 못 따라오는 구간마다
+       같은 프레임이 반복돼 결과물이 버벅였다. 두 프레임 넘게 처졌으면 탐색 1회로 따라잡는다. */
+    /* 기다린 뒤에도 어긋나 있으면 그 자리에서 바로잡는다. 대기 중에 소스가 계속
+       돌기 때문에 앞뒤 양쪽으로 벌어질 수 있는데, 예전엔 그대로 그려서 결과물이 튀었다. */
+    waits.push(waitVideoTime(v, st, 400).then(()=>{
+      /* ended 라고 건너뛰면 안 된다 — 배속 재생이 소스 끝을 지나쳐 버린 경우가
+         바로 그 상태이고, 그때 오차가 가장 크다(실측 1.9초). 끝났어도 되돌린다. */
+      if(Math.abs(v.currentTime-st)>VID_FIX_TOL){ v.pause(); return seekVideo(v, st); }
+    }));
   }
   if(waits.length) await Promise.all(waits);
 }
@@ -10139,7 +10173,8 @@ function snapshotSettings(){
     logo:{show:state.logo.show, x:state.logo.x, y:state.logo.y, scale:state.logo.scale,
       opacity:state.logo.opacity, bright:state.logo.bright, con:state.logo.con},
     wave:state.wave, el:JSON.parse(JSON.stringify(state.el)),
-    waveColor:state.waveColor, titleColor:state.titleColor,
+    waveColor:state.waveColor, titleColor:state.titleColor, waveDyn:state.waveDyn,
+    tape:{...state.tape},
     glow:state.glow, titleFx:state.titleFx, shadowOn:state.shadowOn, vignette:state.vignette,
     titleScale:state.titleScale, showTitle:state.showTitle,
     fontIdx:Math.max(0,FONTS.indexOf(state.font)),
@@ -10161,6 +10196,8 @@ function applySettings(s){
   if(s.trackLabel) Object.assign(state.trackLabel, s.trackLabel);
   state.waveColor=s.waveColor; state.titleColor=s.titleColor;
   state.glow=s.glow; state.titleFx=s.titleFx||'none'; state.shadowOn=s.shadowOn; state.vignette=s.vignette;
+  if(s.waveDyn!=null) state.waveDyn=s.waveDyn;
+  if(s.tape) Object.assign(state.tape, s.tape);
   state.titleScale=s.titleScale; state.showTitle=s.showTitle!==false;
   state.font=FONTS[s.fontIdx]||FONTS[0];
   if(s.progressBar) Object.assign(state.progressBar, s.progressBar);
