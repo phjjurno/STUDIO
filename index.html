@@ -410,12 +410,19 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div id="lpOpts" style="display:none">
       <div class="row" style="margin-top:6px"><button class="chip" id="lpArmBtn">🎯 톤암 표시</button><button class="chip" id="lpSideTitleBtn">🏷 제목 텍스트 따로</button></div>
       <div class="sliders">
-        <div class="slider"><label>LP 크기 <span class="slider-rhs"><b id="lpScaleV" style="display:none">100%</b><input type="number" class="snum" id="lpScaleN" min="30" max="200" value="100"><small class="usuf">%</small></span></label>
-          <input type="range" id="lpScale" min="30" max="200" value="100"></div>
+        <div class="slider"><label>LP 크기 <span class="slider-rhs"><b id="lpScaleV" style="display:none">100%</b><input type="number" class="snum" id="lpScaleN" min="8" max="200" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpScale" min="8" max="200" value="100"></div>
         <div class="slider"><label>LP 가로 위치 <span class="slider-rhs"><b id="lpXV" style="display:none">50%</b><input type="number" class="snum" id="lpXN" min="0" max="100" value="50"><small class="usuf">%</small></span></label>
           <input type="range" id="lpX" min="0" max="100" value="50"></div>
         <div class="slider"><label>LP 세로 위치 <span class="slider-rhs"><b id="lpYV" style="display:none">50%</b><input type="number" class="snum" id="lpYN" min="0" max="100" value="50"><small class="usuf">%</small></span></label>
           <input type="range" id="lpY" min="0" max="100" value="50"></div>
+        <div class="slider"><label>LP 투명도 <span class="slider-rhs"><b id="lpOpV" style="display:none">100%</b><input type="number" class="snum" id="lpOpN" min="5" max="100" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpOp" min="5" max="100" value="100"></div>
+        <div class="slider"><label>LP 밝기 <span class="slider-rhs"><b id="lpBrV" style="display:none">100%</b><input type="number" class="snum" id="lpBrN" min="20" max="200" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpBr" min="20" max="200" value="100"></div>
+        <div class="slider"><label>LP 대비 <span class="slider-rhs"><b id="lpCoV" style="display:none">100%</b><input type="number" class="snum" id="lpCoN" min="20" max="220" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="lpCo" min="20" max="220" value="100"></div>
+        <div class="hint2">배경 영상 위에 얹을 땐 투명도를 낮추고 밝기·대비를 배경에 맞추면 자연스럽게 붙습니다.</div>
       </div>
       </div>
       <div class="hint2" id="lpHint" style="display:none;margin-top:6px">💿 배경(배경 탭에서 사진 업로드) 위에 도는 레코드가 얹힙니다. 미리보기에서 드래그로 옮기고, 「LP 크기」로 크기를 조절하세요.</div>
@@ -2910,7 +2917,7 @@ const state = {
   logo:{img:null, file:null, show:false, x:.09, y:.12, scale:1, opacity:1, bright:1, con:1},
   el:{ wave:{x:.5,y:.74,sw:1,sh:1,panel:1}, title:{x:.5,y:0,custom:false},
        label:{x:.5,y:0,custom:false}, lyrics:{x:.5,y:.84,custom:false},
-       lp:{x:.5,y:.5,scale:1} },
+       lp:{x:.5,y:.5,scale:1,opacity:1,bright:1,con:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
   waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, dur:.5, vol:.55}, linkAssets:true, missingAssets:null,
@@ -3136,12 +3143,36 @@ function ensureCtx(){
 function setStatus(html){ $('status').innerHTML=html; }
 
 /* ───────── 트랙/클립 모델 ───────── */
-const FILTERS={ none:'', cine:'contrast(1.12) saturate(1.2) brightness(.97)',
-  warm:'sepia(.28) saturate(1.15) brightness(1.04)',
-  cool:'saturate(1.02) hue-rotate(14deg) contrast(1.06)',
-  bw:'grayscale(1) contrast(1.1)',
-  vintage:'sepia(.45) contrast(.9) brightness(1.06) saturate(.82)' };
-const FILTER_NAMES={none:'없음',cine:'시네마틱',warm:'웜',cool:'쿨',bw:'흑백',vintage:'빈티지'};
+/* 색 필터 — 세기(k, 0~1)를 받아 기본값(효과 없음)에서 최대치까지 섞는다.
+   예전엔 고정 문자열이라 강도를 못 줄였다. */
+const mix=(base,to,k)=>base+(to-base)*k;
+const FILTERS={
+  none:    ()=>'',
+  cine:    k=>`contrast(${mix(1,1.14,k)}) saturate(${mix(1,1.22,k)}) brightness(${mix(1,.96,k)})`,
+  warm:    k=>`sepia(${mix(0,.30,k)}) saturate(${mix(1,1.18,k)}) brightness(${mix(1,1.05,k)})`,
+  cool:    k=>`saturate(${mix(1,1.04,k)}) hue-rotate(${mix(0,16,k)}deg) contrast(${mix(1,1.08,k)})`,
+  bw:      k=>`grayscale(${mix(0,1,k)}) contrast(${mix(1,1.12,k)})`,
+  vintage: k=>`sepia(${mix(0,.48,k)}) contrast(${mix(1,.88,k)}) brightness(${mix(1,1.07,k)}) saturate(${mix(1,.80,k)})`,
+  teal:    k=>`hue-rotate(${mix(0,-12,k)}deg) saturate(${mix(1,1.35,k)}) contrast(${mix(1,1.18,k)}) brightness(${mix(1,.98,k)})`,
+  fade:    k=>`contrast(${mix(1,.80,k)}) saturate(${mix(1,.78,k)}) brightness(${mix(1,1.10,k)}) sepia(${mix(0,.12,k)})`,
+  noir:    k=>`grayscale(${mix(0,1,k)}) contrast(${mix(1,1.55,k)}) brightness(${mix(1,.92,k)})`,
+  sepiaX:  k=>`sepia(${mix(0,.85,k)}) contrast(${mix(1,1.05,k)}) brightness(${mix(1,1.02,k)})`,
+  dream:   k=>`brightness(${mix(1,1.14,k)}) saturate(${mix(1,.86,k)}) contrast(${mix(1,.88,k)}) blur(${mix(0,1.2,k).toFixed(2)}px)`,
+  neon:    k=>`saturate(${mix(1,1.75,k)}) contrast(${mix(1,1.30,k)}) hue-rotate(${mix(0,-8,k)}deg) brightness(${mix(1,1.04,k)})`,
+  sunset:  k=>`sepia(${mix(0,.35,k)}) hue-rotate(${mix(0,-14,k)}deg) saturate(${mix(1,1.45,k)}) brightness(${mix(1,1.06,k)})`,
+  mint:    k=>`hue-rotate(${mix(0,26,k)}deg) saturate(${mix(1,1.12,k)}) brightness(${mix(1,1.05,k)}) contrast(${mix(1,.96,k)})`,
+  punch:   k=>`saturate(${mix(1,1.55,k)}) contrast(${mix(1,1.28,k)})`,
+  monowarm:k=>`grayscale(${mix(0,1,k)}) sepia(${mix(0,.42,k)}) contrast(${mix(1,1.14,k)}) brightness(${mix(1,1.02,k)})`,
+  night:   k=>`brightness(${mix(1,.82,k)}) contrast(${mix(1,1.22,k)}) saturate(${mix(1,.90,k)}) hue-rotate(${mix(0,10,k)}deg)`,
+};
+const FILTER_NAMES={none:'없음',cine:'시네마틱',warm:'웜',cool:'쿨',bw:'흑백',vintage:'빈티지',
+  teal:'틸 & 오렌지',fade:'페이드 필름',noir:'느와르',sepiaX:'세피아',dream:'드리미',
+  neon:'네온 나이트',sunset:'선셋',mint:'민트',punch:'펀치',monowarm:'웜 모노',night:'나이트'};
+function filterCss(name, amt){
+  const f=FILTERS[name]; if(!f) return '';
+  const k=clamp(amt==null?1:amt,0,1);
+  return k<=0? '' : f(k);
+}
 const TRANS_NAMES={none:'컷(없음)',dissolve:'크로스 디졸브',slide:'슬라이드',zoom:'줌',blur:'블러'};
 
 function defaultTracks(){ return [
@@ -3181,7 +3212,7 @@ const clipEnd=c=>c.start+c.dur;
 function tlDuration(){ let d=0; for(const tr of state.tracks) for(const c of tr.clips) d=Math.max(d,clipEnd(c)); return d; }
 function newClip(assetId, start, dur, extra){
   return Object.assign({ id:uid(), assetId:assetId||null, start, dur, in:0,
-    speed:1, vol:1, fadeIn:0, fadeOut:0,
+    speed:1, vol:1, fadeIn:0, fadeOut:0, filterAmt:1,
     tx:{x:.5,y:.5,scale:1,rot:0,opacity:1}, filter:'none', trans:{type:'none',dur:.5} }, extra||{});
 }
 /* 미디어 클립의 소스 시각 */
@@ -6975,7 +7006,7 @@ function drawMediaClip(c,t,fx,p){
   if(alpha<=0) return;
   g.save();
   g.globalAlpha=clamp(alpha,0,1);
-  const flt=(FILTERS[c.filter]||'');
+  const flt=filterCss(c.filter, c.filterAmt);
   const bl=blurFx? `blur(${(blurFx*(R.w/1920)).toFixed(1)}px)` : '';
   if(flt||bl){ try{ g.filter=(bl+' '+flt).trim(); }catch(e){} }
   const fit=Math.min(w/iw,h/ih)*c.tx.scale*sFx;
@@ -7012,7 +7043,7 @@ function drawLP(t, c, idx, cs, a){
     if(!lpFailed) ensureLP().then(()=>{ if(!state.playing&&!state.rendering) drawNow(); });
     drawLPFallback(t,c,idx,cs,title); return;
   }
-  const el=state.el.lp||(state.el.lp={x:.5,y:.5,scale:1});
+  const el=state.el.lp||(state.el.lp={x:.5,y:.5,scale:1,opacity:1,bright:1,con:1});
   const dW=lpDeck.naturalWidth, dH=lpDeck.naturalHeight;
   /* 레코드 중심을 앵커에 맞춘 배치 */
   const S=Math.min(w/dW,h/dH)*1.15*(el.scale||1);
@@ -7048,17 +7079,22 @@ function drawLP(t, c, idx, cs, a){
 
   const spin=t*3.49;                             /* 33⅓ RPM */
   g.save();
+  /* 영상과 겉돌지 않게 — 투명도·밝기·대비를 LP 전체에 한 번에 건다 */
+  const lpOp=el.opacity!=null? el.opacity : 1;
+  const lpB=el.bright!=null? el.bright : 1, lpC=el.con!=null? el.con : 1;
+  g.globalAlpha*=clamp(lpOp,0,1);
+  if(lpB!==1||lpC!==1){ try{ g.filter=`brightness(${lpB}) contrast(${lpC})`; }catch(e){} }
   /* 데크 */
   g.drawImage(lpDeck, deckX, deckY, drawW, drawH);
   /* 회전 레코드 */
   if(recA>.01){
     const rcx=ancX+recSlide, rcy=ancY, rr=recR*recS;
-    g.save(); g.globalAlpha=recA;
+    g.save(); g.globalAlpha*=recA;
     g.translate(rcx,rcy); g.rotate(spin); g.translate(-rcx,-rcy);
     g.drawImage(lpRec, rcx-rr, rcy-rr, rr*2, rr*2);
     g.restore();
     /* 회전 광택 */
-    g.save(); g.globalAlpha=recA;
+    g.save(); g.globalAlpha*=recA;
     g.beginPath(); g.arc(rcx,rcy,rr*.985,0,Math.PI*2); g.clip();
     g.globalCompositeOperation='lighter';
     g.translate(rcx,rcy); g.rotate(spin*.55);
@@ -7068,7 +7104,7 @@ function drawLP(t, c, idx, cs, a){
     g.restore();
     /* 라벨 제목 — 판과 함께 회전 */
     if(state.showTitle){
-      g.save(); g.globalAlpha=recA;
+      g.save(); g.globalAlpha*=recA; g.filter='none';   /* 제목은 또렷하게 */
       g.translate(rcx,rcy); g.rotate(spin); g.translate(-rcx,-rcy);
       drawLPTitle(g, rcx, rcy, rr*LP_G.labelRatio, title, idx, cs.length, true);
       g.restore();
@@ -8636,6 +8672,7 @@ function propsRenderMulti(){
       selDefs.push({id,set});
     };
     drop('mFilter','색 필터',c=>c.filter,FILTER_NAMES,(c,v)=>c.filter=v);
+    mk('mFAmt','필터 세기',vids,c=>(c.filterAmt==null?1:c.filterAmt),(c,v)=>c.filterAmt=v/100,0,100,v=>v*100,v=>v+'%');
     drop('mTrans','다음 클립으로 전환효과',c=>c.trans.type,TRANS_NAMES,(c,v)=>c.trans.type=v);
     mk('mTransD','전환 길이',vids,c=>c.trans.dur,(c,v)=>c.trans.dur=v/10,2,20,v=>v*10,v=>(v/10).toFixed(1)+'s',true);
   }
@@ -8693,6 +8730,7 @@ function propsRender(){
     rows.push(sld('pOp','불투명도',Math.round(c.tx.opacity*100),0,100,Math.round(c.tx.opacity*100)+'%'));
     rows.push(`<div class="prow"><label>색 필터</label><select id="pFilter">${
       Object.entries(FILTER_NAMES).map(([k,n])=>`<option value="${k}"${c.filter===k?' selected':''}>${n}</option>`).join('')}</select></div>`);
+    rows.push(sld('pFAmt','필터 세기',Math.round((c.filterAmt==null?1:c.filterAmt)*100),0,100,Math.round((c.filterAmt==null?1:c.filterAmt)*100)+'%'));
     rows.push(`<div class="prow"><label>다음 클립으로 전환효과</label><select id="pTrans">${
       Object.entries(TRANS_NAMES).map(([k,n])=>`<option value="${k}"${c.trans.type===k?' selected':''}>${n}</option>`).join('')}</select></div>`);
     rows.push(sld('pTransD','전환 길이',Math.round(c.trans.dur*10),2,20,c.trans.dur.toFixed(1)+'s'));
@@ -8722,6 +8760,7 @@ function propsRender(){
   bindS('pSpeed',v=>{ c.speed=v/100; c.dur=clamp(c.dur,.1,maxDur(c)); if(tr.pl)plRepack(); },v=>(v/100).toFixed(2)+'x');
   bindS('pVol',v=>c.vol=v/100,v=>v+'%');
   bindS('pFi',v=>c.fadeIn=v/10,v=>(v/10).toFixed(1)+'s');
+  bindS('pFAmt',v=>c.filterAmt=v/100,v=>v+'%');
   bindS('pFo',v=>c.fadeOut=v/10,v=>(v/10).toFixed(1)+'s');
   bindS('pScale',v=>c.tx.scale=v/100,v=>v+'%');
   bindS('pRot',v=>c.tx.rot=v,v=>v+'°');
@@ -9538,6 +9577,10 @@ bindSlider('lpScale','lpScaleV',v=>{
   if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1};
   state.el.lp.scale=v/100;
 });
+const lpEl=()=>state.el.lp||(state.el.lp={x:.5,y:.5,scale:1,opacity:1,bright:1,con:1});
+bindSlider('lpOp','lpOpV',v=>lpEl().opacity=v/100);
+bindSlider('lpBr','lpBrV',v=>lpEl().bright=v/100);
+bindSlider('lpCo','lpCoV',v=>lpEl().con=v/100);
 bindSlider('lpX','lpXV',v=>{ if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1}; state.el.lp.x=v/100; });
 bindSlider('lpY','lpYV',v=>{ if(!state.el.lp) state.el.lp={x:.5,y:.5,scale:1}; state.el.lp.y=v/100; });
 $('lpArmBtn').addEventListener('click',e=>{ e.target.classList.toggle('on');
@@ -10178,6 +10221,9 @@ function syncUIFromState(){
   setS('lpScale','lpScaleV',Math.round((state.el.lp?state.el.lp.scale||1:1)*100));
   setS('lpX','lpXV',Math.round((state.el.lp&&state.el.lp.x!=null?state.el.lp.x:.5)*100));
   setS('lpY','lpYV',Math.round((state.el.lp&&state.el.lp.y!=null?state.el.lp.y:.5)*100));
+  setS('lpOp','lpOpV',Math.round((state.el.lp&&state.el.lp.opacity!=null?state.el.lp.opacity:1)*100));
+  setS('lpBr','lpBrV',Math.round((state.el.lp&&state.el.lp.bright!=null?state.el.lp.bright:1)*100));
+  setS('lpCo','lpCoV',Math.round((state.el.lp&&state.el.lp.con!=null?state.el.lp.con:1)*100));
   setS('subSize','subSizeV',Math.round(state.subStyle.size*100));
   setS('subY','subYV',Math.round(state.subStyle.y*100));
   $('titleColor').value=state.titleColor; $('waveColor').value=state.waveColor;
