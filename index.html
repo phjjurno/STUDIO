@@ -683,6 +683,36 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div id="subProg">타임라인의 모든 오디오를 인식해 자막 트랙(S1)에 넣습니다. 모델은 최초 1회만 다운로드되고 브라우저에 캐시됩니다.</div>
       </div></div>
 
+      <div class="grp open"><div class="grp-h">리릭 비디오 (SRT → 가운데 큰 가사)<span class="chev">▾</span></div><div class="grp-b">
+      <div class="hint2">SRT·LRC 를 넣고 켜면 화면 <b>가운데에 가사를 크게</b> 띄웁니다.
+        앞뒤 줄은 흐리게 곁들여 리릭 비디오처럼 흐릅니다. (아래 「자막 목록」에서 파일을 가져오세요)</div>
+      <div class="row" style="margin-top:8px;gap:6px">
+        <button class="chip" id="lvOn">🎤 리릭 비디오 켜기</button>
+        <button class="chip on" id="lvCtx" title="앞뒤 줄 함께 보이기">앞뒤 줄</button>
+        <button class="chip" id="lvKara" title="지나간 만큼 강조색으로 채우기">노래방 채움</button>
+        <button class="chip on" id="lvGlow">글로우</button>
+        <button class="chip on" id="lvAnim">등장 모션</button>
+      </div>
+      <div class="prow" style="margin-top:8px"><label>폰트</label><select id="lvFont"></select></div>
+      <div class="row" style="gap:6px;align-items:center;margin-top:6px">
+        <span class="hint2" style="margin:0;min-width:38px">글자색</span>
+        <label class="colorpick"><input type="color" id="lvColor" value="#FFFFFF">기본</label>
+        <label class="colorpick"><input type="color" id="lvColor2" value="#FFD400">강조·앞뒤줄</label>
+      </div>
+      <div class="sliders">
+        <div class="slider"><label>가사 크기 <span class="slider-rhs"><b id="lvSizeV" style="display:none">100%</b><input type="number" class="snum" id="lvSizeN" min="40" max="320" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="lvSize" min="40" max="320" value="100"></div>
+        <div class="slider"><label>앞뒤 줄 크기 <span class="slider-rhs"><b id="lvSideV" style="display:none">55%</b><input type="number" class="snum" id="lvSideN" min="25" max="100" value="55"><small class="usuf">%</small></span></label>
+          <input type="range" id="lvSide" min="25" max="100" value="55"></div>
+        <div class="slider"><label>앞뒤 줄 진하기 <span class="slider-rhs"><b id="lvDimV" style="display:none">30%</b><input type="number" class="snum" id="lvDimN" min="0" max="90" value="30"><small class="usuf">%</small></span></label>
+          <input type="range" id="lvDim" min="0" max="90" value="30"></div>
+        <div class="slider"><label>가로 위치 <span class="slider-rhs"><b id="lvXV" style="display:none">50%</b><input type="number" class="snum" id="lvXN" min="5" max="95" value="50"><small class="usuf">%</small></span></label>
+          <input type="range" id="lvX" min="5" max="95" value="50"></div>
+        <div class="slider"><label>세로 위치 <span class="slider-rhs"><b id="lvYV" style="display:none">50%</b><input type="number" class="snum" id="lvYN" min="5" max="95" value="50"><small class="usuf">%</small></span></label>
+          <input type="range" id="lvY" min="5" max="95" value="50"></div>
+      </div>
+      </div></div>
+
       <div class="grp open"><div class="grp-h">자막 스타일<span class="chev">▾</span></div><div class="grp-b">
       <div class="opt-label">템플릿</div>
       <div class="row" id="subTplRow">
@@ -2926,6 +2956,9 @@ const state = {
   glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
+  /* 리릭 비디오 — SRT 를 가운데 크게 띄우는 모드 */
+  lyric:{on:false, size:1, sideSize:.55, dim:.30, x:.5, y:.5, fontIdx:0,
+    color:'#FFFFFF', color2:'#FFD400', karaoke:false, context:true, anim:true, glow:true},
   subStyle:{template:'outline', fontIdx:0, size:1, color:'#FFFFFF', color2:'#FFD400', x:.5, y:.86, anim:true,
     tr:{show:true, fontIdx:0, size:.78, color:'#BFD0E2', gap:.34}},   /* 번역(아랫줄) */
   /* 진행 바 */
@@ -7541,7 +7574,78 @@ function evenWords(c){
   const span=c.dur*.92, step=span/ws.length;
   return ws.map((w,i)=>[i*step, (i+1)*step, w]);
 }
+/* ───────── 리릭 비디오 ─────────
+   자막을 화면 아래 한 줄로 깔지 않고, 가운데에 크게 띄우고 앞뒤 줄을 흐리게 곁들인다.
+   SRT 를 그대로 얹으면 리릭 비디오가 되도록 만든 모드. */
+function drawLyricVideo(t){
+  const S=subTrack(); if(!S) return;
+  const LV=state.lyric;
+  const cs=sortedClips(S).filter(c=>(c.text||'').trim());
+  if(!cs.length) return;
+  let idx=-1;
+  for(let i=0;i<cs.length;i++) if(t>=cs[i].start && t<clipEnd(cs[i])){ idx=i; break; }
+  if(idx<0){                                  /* 줄 사이 빈 구간 — 다음 줄을 미리 세워 둔다 */
+    for(let i=0;i<cs.length;i++) if(cs[i].start>t){ idx=i; break; }
+    if(idx<0) idx=cs.length-1;
+  }
+  const {g,w,h}=R, portrait=h>w;
+  const F=FONTS[LV.fontIdx]||FONTS[0];
+  const fsMain=Math.round(w*(portrait?.062:.040)*LV.size*F.mul);
+  const fsSide=Math.round(fsMain*LV.sideSize);
+  const cx=LV.x*w, cy=LV.y*h;
+  const active=(t>=cs[idx].start && t<clipEnd(cs[idx]));
+  const lt=active? t-cs[idx].start : 0;
+  const wrap=(txt,fz)=>{                       /* 폭에 맞춰 줄바꿈 */
+    g.font=`${Math.max(700,F.weight)} ${fz}px ${F.fam},'Noto Sans KR',sans-serif`;
+    return wrapLines(g, txt, w*.86);
+  };
+  const lineH=fz=>fz*1.24;
+  g.save(); g.textAlign='center'; g.textBaseline='middle';
+  /* 앞뒤 줄 — 흐리게 */
+  const drawSide=(i, dir)=>{
+    if(i<0||i>=cs.length||!LV.context) return 0;
+    const rows=wrap(cs[i].text, fsSide);
+    const blockH=rows.length*lineH(fsSide);
+    const y0=cy + dir*(lineH(fsMain)*.5 + fsMain*.55 + blockH*.5);
+    g.globalAlpha=LV.dim;
+    g.fillStyle=LV.color2;
+    rows.forEach((L,k)=>g.fillText(L, cx, y0+(k-(rows.length-1)/2)*lineH(fsSide)));
+    g.globalAlpha=1;
+    return blockH;
+  };
+  drawSide(idx-1,-1); drawSide(idx+1,+1);
+  /* 현재 줄 — 크고 또렷하게, 등장할 때 살짝 떠오름 */
+  const rows=wrap(cs[idx].text, fsMain);
+  let a=1, dy=0, sc=1;
+  if(active && LV.anim){
+    const k=clamp(lt/.32,0,1), e=1-Math.pow(1-k,3);
+    a=Math.min(1,lt/.18); dy=(1-e)*fsMain*.42; sc=.96+.04*e;
+    const rem=clipEnd(cs[idx])-t;
+    if(rem<.25) a*=Math.max(0,rem/.25);
+  }else if(!active) a=LV.dim;
+  g.globalAlpha=a;
+  g.translate(cx,cy+dy); g.scale(sc,sc); g.translate(-cx,-cy);
+  g.font=`${Math.max(700,F.weight)} ${fsMain}px ${F.fam},'Noto Sans KR',sans-serif`;
+  if(LV.glow){ g.shadowColor=hexA(LV.color,.55); g.shadowBlur=w*.012; }
+  if(state.shadowOn){ g.shadowColor=g.shadowColor||'rgba(0,0,0,.6)'; g.shadowOffsetY=2; }
+  /* 노래방 채움 — 지나간 만큼 강조색으로 */
+  const prog=active? clamp(lt/Math.max(.2,(clipEnd(cs[idx])-cs[idx].start)),0,1) : 0;
+  rows.forEach((L,k)=>{
+    const y=cy+(k-(rows.length-1)/2)*lineH(fsMain);
+    g.fillStyle=LV.color;
+    g.fillText(L,cx,y);
+    if(LV.karaoke && active){
+      const lw=g.measureText(L).width;
+      g.save(); g.beginPath();
+      g.rect(cx-lw/2, y-fsMain, lw*clamp(prog*rows.length-k,0,1), fsMain*2); g.clip();
+      g.fillStyle=LV.color2; g.fillText(L,cx,y); g.restore();
+    }
+  });
+  g.restore();
+  if(R.preview) HIT.push({id:'lyricv', x:cx-w*.43, y:cy-fsMain*1.2, w:w*.86, h:fsMain*2.4});
+}
 function drawSubs(t){
+  if(state.lyric && state.lyric.on){ drawLyricVideo(t); return; }
   const c=activeSub(t);
   if(!c||!(c.text||'').trim()) return;
   const st=state.subStyle, {g,w,h}=R;
@@ -8636,6 +8740,37 @@ $('addTextBtn').onclick=()=>{
     {otext:'텍스트', ofont:0, osize:1, ocolor:'#FFFFFF'}));
   renderAll();
 };
+
+/* ── 리릭 비디오 바인딩 ── */
+function syncLyricUI(){
+  const LV=state.lyric;
+  const set=(id,on)=>{ const b=$(id); if(b) b.classList.toggle('on',!!on); };
+  set('lvOn',LV.on); set('lvCtx',LV.context); set('lvKara',LV.karaoke);
+  set('lvGlow',LV.glow); set('lvAnim',LV.anim);
+  const b=$('lvOn'); if(b) b.textContent = LV.on? '🎤 리릭 비디오 켜짐' : '🎤 리릭 비디오 켜기';
+  const fs=$('lvFont');
+  if(fs && !fs.options.length) fs.innerHTML=FONTS.map((f,i)=>`<option value="${i}">${f.n}</option>`).join('');
+  if(fs) fs.value=String(LV.fontIdx);
+  if($('lvColor')) $('lvColor').value=LV.color;
+  if($('lvColor2')) $('lvColor2').value=LV.color2;
+}
+const lvToggle=(id,key)=>{ const b=$(id); if(!b) return;
+  b.onclick=()=>{ state.lyric[key]=!state.lyric[key]; syncLyricUI(); drawNow(); }; };
+$('lvOn').onclick=()=>{ state.lyric.on=!state.lyric.on; syncLyricUI(); drawNow();
+  setStatus(state.lyric.on
+    ? '리릭 비디오 켜짐 — 자막이 화면 가운데에 크게 뜹니다. 크기·위치는 아래 슬라이더로.'
+    : '리릭 비디오 끔 — 일반 자막 스타일로 돌아갑니다.'); };
+lvToggle('lvCtx','context'); lvToggle('lvKara','karaoke');
+lvToggle('lvGlow','glow'); lvToggle('lvAnim','anim');
+$('lvFont').addEventListener('change',e=>{ state.lyric.fontIdx=+e.target.value; drawNow(); });
+$('lvColor').addEventListener('input',e=>{ state.lyric.color=e.target.value; drawNow(); });
+$('lvColor2').addEventListener('input',e=>{ state.lyric.color2=e.target.value; drawNow(); });
+bindSlider('lvSize','lvSizeV',v=>state.lyric.size=v/100);
+bindSlider('lvSide','lvSideV',v=>state.lyric.sideSize=v/100);
+bindSlider('lvDim','lvDimV',v=>state.lyric.dim=v/100);
+bindSlider('lvX','lvXV',v=>state.lyric.x=v/100);
+bindSlider('lvY','lvYV',v=>state.lyric.y=v/100);
+syncLyricUI();
 
 /* 자막 스타일 바인딩 */
 /* 템플릿 칩은 두 줄(기본·키네틱)로 나뉘어 있으므로 한쪽을 고르면 반대쪽 선택을 푼다 */
@@ -10267,6 +10402,7 @@ function snapshotSettings(){
       opacity:state.logo.opacity, bright:state.logo.bright, con:state.logo.con},
     wave:state.wave, el:JSON.parse(JSON.stringify(state.el)),
     waveColor:state.waveColor, titleColor:state.titleColor, waveDyn:state.waveDyn,
+    lyric:{...state.lyric},
     tape:{...state.tape},
     glow:state.glow, titleFx:state.titleFx, shadowOn:state.shadowOn, vignette:state.vignette,
     titleScale:state.titleScale, showTitle:state.showTitle,
@@ -10291,6 +10427,7 @@ function applySettings(s){
   state.glow=s.glow; state.titleFx=s.titleFx||'none'; state.shadowOn=s.shadowOn; state.vignette=s.vignette;
   if(s.waveDyn!=null) state.waveDyn=s.waveDyn;
   if(s.tape) Object.assign(state.tape, s.tape);
+  if(s.lyric){ Object.assign(state.lyric, s.lyric); syncLyricUI(); }
   state.titleScale=s.titleScale; state.showTitle=s.showTitle!==false;
   state.font=FONTS[s.fontIdx]||FONTS[0];
   if(s.progressBar) Object.assign(state.progressBar, s.progressBar);
@@ -10347,6 +10484,13 @@ function syncUIFromState(){
   setS('waveSW','waveSWV',Math.round(state.el.wave.sw*100));
   setS('waveSH','waveSHV',Math.round(state.el.wave.sh*100));
   setS('waveDyn','waveDynV',Math.round((state.waveDyn??.45)*100));
+  const LV=state.lyric||{};
+  setS('lvSize','lvSizeV',Math.round((LV.size??1)*100));
+  setS('lvSide','lvSideV',Math.round((LV.sideSize??.55)*100));
+  setS('lvDim','lvDimV',Math.round((LV.dim??.3)*100));
+  setS('lvX','lvXV',Math.round((LV.x??.5)*100));
+  setS('lvY','lvYV',Math.round((LV.y??.5)*100));
+  if(typeof syncLyricUI==='function') syncLyricUI();
   setS('wavePanel','wavePanelV',Math.round((state.el.wave.panel!=null?state.el.wave.panel:1)*100));
   setS('lpScale','lpScaleV',Math.round((state.el.lp?state.el.lp.scale||1:1)*100));
   setS('lpX','lpXV',Math.round((state.el.lp&&state.el.lp.x!=null?state.el.lp.x:.5)*100));
