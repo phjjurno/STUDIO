@@ -6909,9 +6909,32 @@ function drawFrame(t, live, g, w, h, isPreview, wallT){
   drawOverlays(t);
   drawSubs(t);
   drawLogo();
-  if(isPreview) drawHover();
+  if(isPreview){ drawMissingWarn(); drawHover(); }
 }
 
+/* 링크가 끊긴 파일이 있으면 미리보기에 대놓고 띄운다 —
+   소리가 안 나고 파형도 안 움직이는 이유가 이것이기 때문이다. */
+function drawMissingWarn(){
+  const ids=state.missingAssets||[];
+  if(!ids.length) return;
+  const {g,w,h}=R;
+  const names=ids.map(id=>{ const a=A(id); return a?a.name:''; }).filter(Boolean);
+  const fs=Math.round(w*.022);
+  g.save();
+  g.font=`700 ${fs}px 'Noto Sans KR',sans-serif`;
+  const l1=`⚠ 원본 파일 ${names.length}개를 찾지 못했습니다`;
+  const l2=`프로젝트 탭 → 🔗 파일 다시 연결`;
+  const tw=Math.max(g.measureText(l1).width, g.measureText(l2).width)+fs*1.6;
+  const bh=fs*3.4, bx=(w-tw)/2, by=h*.06;
+  g.fillStyle='rgba(120,20,20,.86)';
+  roundRect(g,bx,by,tw,bh,fs*.4); g.fill();
+  g.textAlign='center'; g.fillStyle='#fff';
+  g.fillText(l1, w/2, by+fs*1.3);
+  g.font=`500 ${Math.round(fs*.85)}px 'Noto Sans KR',sans-serif`;
+  g.fillStyle='#ffd9d9';
+  g.fillText(l2, w/2, by+fs*2.5);
+  g.restore();
+}
 /* ───────── 로고 · 워터마크 ───────── */
 function drawLogo(){
   const L=state.logo;
@@ -10735,29 +10758,56 @@ $('projLinkBtn').onclick=()=>{
     : '복사 저장 — 음원을 프로젝트 안에 통째로 담습니다 (파일을 옮겨도 열립니다).');
 };
 /* 링크가 끊긴 파일을 다시 지정 */
+/* 링크가 끊긴 파일 다시 연결 — 한 번에 여러 개를 골라 이름으로 맞춘다.
+   예전엔 파일마다 선택창이 따로 떠서 어떤 파일을 골라야 하는지도 알 수 없었다. */
 $('projRelink').onclick=async()=>{
-  const ids=state.missingAssets||[];
-  if(!ids.length||!CAN_LINK) return;
-  for(const id of ids){
-    const a=A(id); if(!a||!a.missingFile) continue;
-    let hs;
-    try{ hs=await showOpenFilePicker({multiple:false}); }catch(e){ return; }
-    const fh=hs[0]; const f=await fh.getFile();
+  const miss=(state.missingAssets||[]).map(id=>A(id)).filter(a=>a&&a.missingFile);
+  if(!miss.length){ $('projRelink').style.display='none'; return; }
+  setStatus(`찾을 파일 ${miss.length}개 — ${miss.map(a=>a.name).join(', ')}. 한 번에 골라도 됩니다.`);
+  let files=[];
+  if(CAN_LINK){
+    try{ const hs=await showOpenFilePicker({multiple:true});
+      for(const h of hs){ const f=await h.getFile(); f.__fh=h; files.push(f); } }
+    catch(e){ if(e&&e.name==='AbortError') return; }
+  }
+  if(!files.length){                                   /* 선택기를 못 쓰면 파일 입력으로 */
+    files=await new Promise(res=>{
+      const inp=document.createElement('input'); inp.type='file'; inp.multiple=true;
+      inp.accept='audio/*,video/*';
+      inp.onchange=()=>res([...inp.files]); inp.oncancel=()=>res([]); inp.click(); });
+  }
+  if(!files.length) return;
+  const norm=x=>String(x||'').toLowerCase().replace(/\.[a-z0-9]+$/,'').replace(/[\s_\-]/g,'');
+  const pool=files.slice();
+  let ok=0, fail=[];
+  for(const asset of miss){
+    /* 이름이 같은 것을 먼저, 없으면 남은 것에서 순서대로 */
+    let i=pool.findIndex(f=>norm(f.name)===norm(asset.name));
+    if(i<0) i=pool.findIndex(f=>norm(f.name).includes(norm(asset.name))||norm(asset.name).includes(norm(f.name)));
+    if(i<0) i=0;
+    const f=pool.splice(i,1)[0];
+    if(!f) break;
     try{
-      if(a.kind==='audio'){
+      if(asset.kind==='audio'){
         const buf=await actx.decodeAudioData(await f.arrayBuffer());
-        Object.assign(a,{blob:f,fh,duration:buf.duration,audioBuffer:buf,missingFile:false,name:cleanTitle(f.name)});
+        Object.assign(asset,{blob:f, fh:f.__fh||null, duration:buf.duration, audioBuffer:buf, missingFile:false});
       }else{
         const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.src=URL.createObjectURL(f);
         await withTimeout(new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej;}),15000,'video load');
-        Object.assign(a,{blob:f,fh,duration:v.duration,videoEl:v,width:v.videoWidth,height:v.videoHeight,missingFile:false});
+        Object.assign(asset,{blob:f, fh:f.__fh||null, duration:v.duration, videoEl:v,
+          width:v.videoWidth, height:v.videoHeight, missingFile:false});
       }
-    }catch(e){ setStatus(`「${f.name}」 을 읽지 못했습니다.`); }
+      ok++;
+    }catch(e){ fail.push(f.name); }
   }
-  state.missingAssets=(state.missingAssets||[]).filter(id=>{ const a=A(id); return a&&a.missingFile; });
-  if(!state.missingAssets.length){ $('projRelink').style.display='none';
-    setStatus('파일을 다시 연결했습니다 — 저장해 두면 다음에도 그대로 열립니다.'); }
+  state.missingAssets=(state.missingAssets||[]).filter(id=>{ const x=A(id); return x&&x.missingFile; });
+  const left=state.missingAssets.length;
+  if(!left) $('projRelink').style.display='none';
   renderAll();
+  setStatus(left
+    ? `${ok}개를 연결했고 ${left}개가 남았습니다 — 다시 눌러 나머지를 고르세요.`
+    : `파일 ${ok}개를 다시 연결했습니다 — <b>이제 「저장」을 한 번 누르면</b> 음원이 프로젝트에 담겨 다음부터 그냥 열립니다.`
+      +(fail.length? `<br>읽지 못한 파일: ${fail.join(', ')}`:''));
 };
 $('projDelAll').onclick=async()=>{
   let all=[]; try{ all=await projAll(); }catch(e){}
