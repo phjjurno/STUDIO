@@ -136,6 +136,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .proj-row .pdate{color:var(--dim);font-size:10.5px;white-space:nowrap}
 .proj-row .psize{color:var(--mist);font-size:11px;font-weight:700;white-space:nowrap}
 .proj-row .psize.link{color:#7fd6a2}
+.proj-row .psize.opfs{color:#7fd6a2}
 .proj-row .tbtn{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:2px 8px;background:none;color:var(--dim);cursor:pointer;font-family:inherit}
 .proj-row .tbtn:hover{color:var(--mist);border-color:var(--mist)}
 .proj-row .pdel:hover{color:var(--danger);border-color:var(--danger)}
@@ -3350,7 +3351,10 @@ async function importFiles(fileList){
 async function importAudio(f){
   const buf=await actx.decodeAudioData(await f.arrayBuffer());
   const id=uid();
-  state.assets.set(id,{id,kind:'audio',name:cleanTitle(f.name),blob:f,duration:buf.duration,audioBuffer:buf,fh:f.__fh||null});
+  const ext=(f.name||'').split('.').pop()||'mp3';
+  const key=`${id}.${ext}`;
+  opfsStore(f,key); /* 백그라운드 저장 — 실패해도 blob 이 있으므로 계속 작동 */
+  state.assets.set(id,{id,kind:'audio',name:cleanTitle(f.name),blob:f,opfsKey:key,duration:buf.duration,audioBuffer:buf,fh:f.__fh||null});
   plAppend(id);
 }
 function firstVideoTrack(){ let vt=state.tracks.find(t=>t.kind==='video');
@@ -3365,7 +3369,10 @@ async function importVideo(f){
   v.muted=true; v.playsInline=true; v.preload='auto'; v.src=url;
   await withTimeout(new Promise((res,rej)=>{ v.onloadedmetadata=res; v.onerror=()=>rej(new Error('video load')); }),15000,'영상 메타데이터 로드 실패');
   const id=uid();
-  const a={id,kind:'video',name:cleanTitle(f.name),blob:f,duration:v.duration,
+  const ext2=(f.name||'').split('.').pop()||'mp4';
+  const key2=`${id}.${ext2}`;
+  opfsStore(f,key2);
+  const a={id,kind:'video',name:cleanTitle(f.name),blob:f,opfsKey:key2,duration:v.duration,
     width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null,fh:f.__fh||null};
   state.assets.set(id,a);
   /* 썸네일 */
@@ -3384,7 +3391,10 @@ async function importImage(f){
   const img=new Image();
   await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; img.src=URL.createObjectURL(f); });
   const id=uid();
-  state.assets.set(id,{id,kind:'image',name:cleanTitle(f.name),blob:f,duration:0,
+  const extI=(f.name||'').split('.').pop()||'jpg';
+  const keyI=`${id}.${extI}`;
+  opfsStore(f,keyI);
+  state.assets.set(id,{id,kind:'image',name:cleanTitle(f.name),blob:f,opfsKey:keyI,duration:0,
     width:img.naturalWidth,height:img.naturalHeight,img});
   const vt=firstVideoTrack();
   vt.clips.push(newClip(id, trackEndOf(vt), 5));
@@ -10437,9 +10447,56 @@ async function projAll(){ const db=await pdb(); return new Promise((res,rej)=>{
 async function projGet(name){ const db=await pdb(); return new Promise((res,rej)=>{
   const q=db.transaction('projects').objectStore('projects').get(name);
   q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
-async function projDel(name){ const db=await pdb(); return new Promise((res,rej)=>{
-  const tx=db.transaction('projects','readwrite'); tx.objectStore('projects').delete(name);
-  tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
+async function projDel(name){
+  /* OPFS 에셋도 함께 지운다 */
+  try{
+    const rec=await projGet(name);
+    if(rec&&rec.assets) for(const a of rec.assets) if(a.opfsKey) await opfsDelete(a.opfsKey);
+  }catch(e){}
+  const db=await pdb(); return new Promise((res,rej)=>{
+    const tx=db.transaction('projects','readwrite'); tx.objectStore('projects').delete(name);
+    tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
+
+/* ── OPFS media store ─────────────────────────────────────────────────────
+   미디어 파일을 브라우저 전용 영구 파일시스템(OPFS)에 보관한다.
+   프로젝트 레코드에는 blob 대신 키만 저장 → 프로젝트 파일이 수십 KB 수준으로 줄어든다.
+   OPFS 는 권한 요청 없이 세션 사이에도 유지되고, 파일을 옮겨도 영향받지 않는다. */
+async function opfsMediaDir(){
+  try{
+    const root=await navigator.storage.getDirectory();
+    return root.getDirectoryHandle('pulseorign-media',{create:true});
+  }catch(e){ return null; }
+}
+async function opfsStore(blob,key){
+  try{
+    const dir=await opfsMediaDir(); if(!dir) return false;
+    const fh=await dir.getFileHandle(key,{create:true});
+    const ws=await fh.createWritable();
+    await ws.write(blob); await ws.close(); return true;
+  }catch(e){ console.warn('OPFS 저장 실패',key,e); return false; }
+}
+async function opfsRead(key){
+  try{
+    const dir=await opfsMediaDir(); if(!dir) return null;
+    const fh=await dir.getFileHandle(key);
+    return await fh.getFile();
+  }catch(e){ return null; }
+}
+async function opfsDelete(key){
+  try{
+    const dir=await opfsMediaDir(); if(!dir) return;
+    await dir.removeEntry(key);
+  }catch(e){}
+}
+async function opfsTotalSize(){
+  try{
+    const dir=await opfsMediaDir(); if(!dir) return 0;
+    let total=0;
+    for await(const [,fh] of dir.entries())
+      if(fh.kind==='file'){ const f=await fh.getFile(); total+=f.size; }
+    return total;
+  }catch(e){ return 0; }
+}
 
 function snapshotSettings(){
   return { ratio:{...state.ratio},
@@ -10590,15 +10647,27 @@ async function saveProject(){
     const assets=[];
     for(const a of state.assets.values()){
       if(!used.has(a.id)) continue;
+      /* ① OPFS에 이미 저장된 에셋 — 키만 저장 (blob 불필요) */
+      if(a.opfsKey){
+        const ok=await opfsRead(a.opfsKey);
+        if(ok){ assets.push({id:a.id,kind:a.kind,name:a.name,opfsKey:a.opfsKey}); continue; }
+        /* OPFS에 없으면 아래 blob 경로로 재저장 */
+      }
+      /* ② blob/fh 방식 — OPFS로 이전 또는 blob 그대로 저장 */
       let blob=a.blob;
-      /* 링크로 저장돼 있던 프로젝트를 다시 저장하는 경우 — 원본을 읽어 담는다 */
       if(!blob && a.fh){ try{ blob=await a.fh.getFile(); }catch(e){} }
-      /* 파일 선택기로 고른 File 은 디스크의 그 파일을 가리키기만 한다. 그대로 담아 두면
-         원본을 옮기거나 지웠을 때 프로젝트 안의 음원까지 못 읽는다(실측: 원본 삭제 후
-         소리가 사라짐). 핸들에서 온 것은 바이트를 복사해 프로젝트가 제 사본을 갖게 한다. */
-      if(blob && a.fh){ try{ blob=new Blob([await blob.arrayBuffer()], {type:blob.type||''}); }catch(e){} }
+      if(blob && a.fh){ try{ blob=new Blob([await blob.arrayBuffer()],{type:blob.type||''}); }catch(e){} }
       if(!blob){ throw new Error(`「${a.name}」 원본을 찾을 수 없습니다 — 「🔗 파일 다시 연결」로 지정한 뒤 저장하세요.`); }
-      assets.push({id:a.id, kind:a.kind, name:a.name, blob});
+      /* OPFS 이전 시도 — 성공하면 blob 저장 건너뜀 */
+      const ext=(a.name||'').split('.').pop()||'bin';
+      const key=`${a.id}.${ext}`;
+      const migrated=await opfsStore(blob,key);
+      if(migrated){
+        a.opfsKey=key; a.blob=null;
+        assets.push({id:a.id,kind:a.kind,name:a.name,opfsKey:key});
+      } else {
+        assets.push({id:a.id,kind:a.kind,name:a.name,blob});
+      }
     }
     const tracks=JSON.parse(serTracks()).tracks;
     await projPut({ name, updated:Date.now(), version:3,
@@ -10618,34 +10687,43 @@ async function loadProject(name){
   ensureCtx(); stopSnippet(); pause();
   setStatus(`「${name}」 불러오는 중…`);
   state.assets.clear();
-  /* 링크로 저장된 파일은 권한을 먼저 한꺼번에 받아 둔다 (클릭 직후여야 물어볼 수 있다) */
   const missing=[];
+  /* ① OPFS 에셋 읽기 (권한 불필요, 항상 즉시 읽힘) */
+  for(const ar of rec.assets){
+    if(!ar.opfsKey || ar.blob) continue;
+    const file=await opfsRead(ar.opfsKey);
+    if(file) ar.blob=file;
+    /* file이 null이면 아래 루프에서 missing 처리 */
+  }
+  /* ② 링크(fh) 저장된 파일은 권한을 한꺼번에 받아 둔다 */
   for(const ar of rec.assets){
     if(!ar.fh || ar.blob) continue;
     try{
       let st=await ar.fh.queryPermission({mode:'read'});
       if(st!=='granted') st=await ar.fh.requestPermission({mode:'read'});
-      if(st!=='granted'){ missing.push(ar); continue; }
-      ar.blob=await ar.fh.getFile();          /* 실제 바이트는 여기서 디스크에서 읽는다 */
-    }catch(e){ console.warn('링크 파일 열기 실패', ar.name, e); missing.push(ar); }
+      if(st!=='granted') continue; /* blob=null 그대로 → 아래 루프에서 missing 처리 */
+      ar.blob=await ar.fh.getFile();
+    }catch(e){ console.warn('링크 파일 열기 실패', ar.name, e); }
   }
   for(const ar of rec.assets){
     if(!ar.blob){                              /* 못 찾은 파일 — 자리만 만들어 둔다 */
       state.assets.set(ar.id,{id:ar.id,kind:ar.kind,name:ar.name,blob:null,
-        duration:0,audioBuffer:null,fh:ar.fh||null,missingFile:true});
+        duration:0,audioBuffer:null,opfsKey:ar.opfsKey||null,fh:ar.fh||null,missingFile:true});
+      missing.push(ar);
       continue;
     }
     try{
       if(ar.kind==='audio'){
         const buf=await actx.decodeAudioData(await ar.blob.arrayBuffer());
-        state.assets.set(ar.id,{id:ar.id,kind:'audio',name:ar.name,blob:ar.blob,duration:buf.duration,audioBuffer:buf,fh:ar.fh||null});
+        state.assets.set(ar.id,{id:ar.id,kind:'audio',name:ar.name,blob:ar.blob,
+          opfsKey:ar.opfsKey||null,duration:buf.duration,audioBuffer:buf,fh:ar.fh||null});
       }else if(ar.kind==='video'){
         const url=URL.createObjectURL(ar.blob);
         const v=document.createElement('video');
         v.muted=true; v.playsInline=true; v.preload='auto'; v.src=url;
         await withTimeout(new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej;}),15000,'video load');
-        const a={id:ar.id,kind:'video',name:ar.name,blob:ar.blob,duration:v.duration,
-          width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null,fh:ar.fh||null};
+        const a={id:ar.id,kind:'video',name:ar.name,blob:ar.blob,opfsKey:ar.opfsKey||null,
+          duration:v.duration,width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null,fh:ar.fh||null};
         try{ await seekVideo(v,Math.min(.5,v.duration/2));
           const tc=document.createElement('canvas'); tc.width=120;
           tc.height=Math.max(1,Math.round(120*v.videoHeight/Math.max(1,v.videoWidth)));
@@ -10657,8 +10735,8 @@ async function loadProject(name){
       }else{
         const img=new Image();
         await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=URL.createObjectURL(ar.blob);});
-        state.assets.set(ar.id,{id:ar.id,kind:'image',name:ar.name,blob:ar.blob,duration:0,
-          width:img.naturalWidth,height:img.naturalHeight,img});
+        state.assets.set(ar.id,{id:ar.id,kind:'image',name:ar.name,blob:ar.blob,opfsKey:ar.opfsKey||null,
+          duration:0,width:img.naturalWidth,height:img.naturalHeight,img});
       }
     }catch(e){ console.warn('에셋 로드 실패', ar.name, e); }
   }
@@ -10699,18 +10777,19 @@ const fmtBytes=n=>{ n=n||0;
   if(n<1048576) return (n/1024).toFixed(0)+' KB';
   if(n<1073741824) return (n/1048576).toFixed(n<10485760?1:0)+' MB';
   return (n/1073741824).toFixed(2)+' GB'; };
-/* 프로젝트가 실제로 차지하는 용량 — 담긴 파일 크기의 합.
-   링크로 저장된 것은 파일을 복사하지 않으므로 여기에 잡히지 않는다. */
+/* 프로젝트 레코드 자체의 용량.
+   OPFS 에셋은 레코드에 키만 있어서 이 숫자가 아주 작다 — 실제 미디어는 OPFS 합계로 따로 표시한다. */
 function projSize(p){
-  let bytes=0, linked=0;
+  let bytes=0, linked=0, opfs=0;
   for(const a of (p.assets||[])){
-    if(a.blob&&a.blob.size) bytes+=a.blob.size;
+    if(a.opfsKey) opfs++;
+    else if(a.blob&&a.blob.size) bytes+=a.blob.size;
     else if(a.fh) linked++;
   }
   if(p.bgImage&&p.bgImage.size) bytes+=p.bgImage.size;
   if(p.logoImage&&p.logoImage.size) bytes+=p.logoImage.size;
   try{ bytes+=JSON.stringify(p.tracks||[]).length; }catch(e){}
-  return {bytes, linked};
+  return {bytes, linked, opfs};
 }
 async function refreshProjList(){
   const list=$('projList'); list.innerHTML='';
@@ -10718,33 +10797,41 @@ async function refreshProjList(){
   try{ all=await projAll(); }catch(e){}
   all.sort((a,b)=>b.updated-a.updated);
   $('projEmpty').style.display=all.length? 'none':'block';
-  let total=0, totalLinked=0;
+  let total=0, totalLinked=0, totalOpfs=0;
   for(const p of all){
-    const {bytes,linked}=projSize(p); total+=bytes; totalLinked+=linked;
+    const {bytes,linked,opfs}=projSize(p); total+=bytes; totalLinked+=linked; totalOpfs+=opfs;
     const row=document.createElement('div'); row.className='proj-row';
     const d=new Date(p.updated);
     const ds=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     const legacy=p.version!==3;
+    const sizeLabel=opfs&&bytes<200000? `💾 경량 (${opfs}개)` : linked&&bytes<200000? '🔗 링크' : fmtBytes(bytes);
+    const sizeTitle=opfs? `${opfs}개 미디어 파일이 브라우저 저장소(OPFS)에 보관됨 — 프로젝트 자체는 ${fmtBytes(bytes)}`
+      : linked? `${linked}개 파일은 링크(복사 안 함)` : '프로젝트에 담긴 파일 용량';
     row.innerHTML=`<span class="pname">📁 ${p.name}${legacy?' <span style="color:var(--dim);font-size:10px">(v2)</span>':''}</span>
       <span class="pmeta">
-        <span class="psize${linked?' link':''}" title="${linked? linked+'개 파일은 링크(복사 안 함)':'프로젝트에 담긴 파일 용량'}">${linked&&bytes<200000? '🔗 링크' : fmtBytes(bytes)}</span>
+        <span class="psize${opfs?' opfs':linked?' link':''}" title="${sizeTitle}">${sizeLabel}</span>
         <span class="pdate">${ds}</span>
       </span>
       <button class="tbtn pload"${legacy?' disabled':''}>불러오기</button><button class="tbtn pdel">삭제</button>`;
     row.querySelector('.pload').onclick=()=>loadProject(p.name);
     row.querySelector('.pdel').onclick=async()=>{
-      if(confirm(`「${p.name}」 프로젝트를 삭제할까요?\n담긴 파일 ${fmtBytes(bytes)} 이 함께 지워집니다. (원본 파일은 그대로입니다)`)){
-        await projDel(p.name); refreshProjList(); }
+      const msg=opfs
+        ? `「${p.name}」 프로젝트를 삭제할까요?\n브라우저 저장소의 미디어 파일(${opfs}개)도 함께 지워집니다.`
+        : `「${p.name}」 프로젝트를 삭제할까요?\n담긴 파일 ${fmtBytes(bytes)} 이 함께 지워집니다.`;
+      if(confirm(msg)){ await projDel(p.name); refreshProjList(); }
     };
     list.appendChild(row);
   }
   let usage='';
   try{ const est=await navigator.storage.estimate();
-    usage=` · 이 사이트가 브라우저에서 쓰는 전체 <b>${fmtBytes(est.usage)}</b>`
+    usage=` · 브라우저 전체 사용 <b>${fmtBytes(est.usage)}</b>`
          + (est.quota? ` / 허용 ${fmtBytes(est.quota)}`:''); }catch(e){}
+  const opfsNote=totalOpfs? ` · <span style="color:#7fd6a2">💾 경량 저장 ${totalOpfs}개</span>` : '';
   $('projUsage').innerHTML = all.length
-    ? `프로젝트 <b>${all.length}개</b> · 담긴 파일 합계 <b style="color:var(--mist)">${fmtBytes(total)}</b>`
-      + (totalLinked? ` · 링크로 걸린 파일 <b style="color:#7fd6a2">${totalLinked}개</b>(복사 안 함)`:'')
+    ? `프로젝트 <b>${all.length}개</b>`
+      + (total? ` · 레코드 <b style="color:var(--mist)">${fmtBytes(total)}</b>` : '')
+      + opfsNote
+      + (totalLinked? ` · 링크 <b style="color:#7fd6a2">${totalLinked}개</b>`:'')
       + usage
     : `저장된 프로젝트 없음${usage}`;
   $('projDelAll').style.display=all.length? '':'none';
