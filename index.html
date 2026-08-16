@@ -221,6 +221,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #shList .shrow.cur{border-color:var(--amber)}
 #shList .shrow.pick{border-color:var(--mist);background:rgba(140,190,255,.07)}
 #shList .shrow .dur{font-size:10.5px;color:var(--dim);white-space:nowrap}
+#shList .shrow textarea.hk{resize:vertical;line-height:1.35;font-family:inherit;min-height:38px}
 #shHookList .hk-item{text-align:left;justify-content:flex-start;padding:7px 10px;font-size:12.5px}
 .stepper{display:flex;align-items:center;gap:3px}
 .stepper .st{padding:4px 9px;font-size:14px;line-height:1;font-weight:700}
@@ -9260,7 +9261,7 @@ function renderShortsList(){
         <button class="here" title="재생 헤드 위치를 시작점으로">⤓</button>
         <button class="rm" title="빼기">✕</button></span>
       <span class="fields">
-        <span class="hkw"><input class="hk" placeholder="후킹 문구" style="width:100%"></span>
+        <span class="hkw"><textarea class="hk" rows="2" placeholder="후킹 문구 — 누르면 미리보기에 뜹니다 · Enter 로 줄바꿈" style="width:100%"></textarea></span>
         <span class="fl">시작</span><input class="tm" title="시작 시각">
         <span class="fl">길이</span><input class="dl" type="number" min="5" max="180" step="1" title="이 곡의 길이(초)">
         <small class="fl" style="margin-left:auto">초</small>
@@ -9268,7 +9269,12 @@ function renderShortsList(){
     row.querySelector('.ti').textContent=it.title;
     row.querySelector('.dur').textContent=fmtT(it.start)+' · '+(it.dur||0).toFixed(0)+'초';
     const hk=row.querySelector('.hk'); hk.value=it.hook||'';
-    hk.addEventListener('input',()=>it.hook=hk.value);
+    /* 누르거나 고치는 즉시 작업 화면 미리보기에 띄운다 — 줄이 어디서 갈리는지,
+       배너 위/아랫줄에 뭐가 들어가는지 보면서 다듬을 수 있게. */
+    const showIt=()=>{ shortsPick=i; previewHook(hk.value.replace(/\s+$/,'')); };
+    hk.addEventListener('focus',showIt);
+    hk.addEventListener('click',e=>{ e.stopPropagation(); showIt(); });
+    hk.addEventListener('input',()=>{ it.hook=hk.value; previewHook(hk.value.replace(/\s+$/,'')); });
     const maxDurOf=()=>{ const c=plClips().find(x=>x.id===it.clipId);
       return (c? clipEnd(c) : tlDuration())-it.start; };
     const tm=row.querySelector('.tm'); tm.value=fmtT(it.start);
@@ -9317,6 +9323,7 @@ function showShortsRange(i){
   exp.start=clamp(it.start,0,Math.max(0,dur-.1));
   exp.end=clamp(it.start+len, exp.start+.1, dur);
   shortsPick=i;
+  if(it.hook) previewHook(it.hook);
   seekTo(exp.start);
   if($('expStart')) $('expStart').value=fmtT(exp.start);
   if($('expEnd')) $('expEnd').value=fmtT(exp.end);
