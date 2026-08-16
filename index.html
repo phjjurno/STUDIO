@@ -3052,10 +3052,16 @@ const shExp={w:1080, h:1920, scale:1, fps:30};
    그래서 (1) 내보내기와 같은 큐 깊이로 돌리고 (2) 앞쪽 워밍업 구간을 빼고
    (3) flush를 시간 측정에서 제외해 '지속 처리량'을 재도록 했다. */
 async function probeEncoder(baseCfg, W, H, FPS, qmax){
+  /* 소프트웨어 인코더를 빼고 있었다. 맥에서 하드웨어(VideoToolbox) 경로가
+     프레임마다 GPU 전송 비용을 물어 오히려 훨씬 느린 경우가 있다 —
+     실측 1080p30: prefer-hardware 57fps(1.9배속) vs prefer-software 368fps(12.3배속).
+     기기마다 다르므로 넷이 아니라 여섯을 다 재고 제일 빠른 걸 쓴다. */
   const cands=[
+    {acc:'prefer-software', mode:'quality'},
     {acc:'prefer-hardware', mode:'quality'},
-    {acc:'prefer-hardware', mode:'realtime'},
     {acc:null,              mode:'quality'},
+    {acc:'prefer-software', mode:'realtime'},
+    {acc:'prefer-hardware', mode:'realtime'},
     {acc:null,              mode:'realtime'},
   ];
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
@@ -3063,7 +3069,7 @@ async function probeEncoder(baseCfg, W, H, FPS, qmax){
   const NWARM=8, NMEAS=28, NPROBE=NWARM+NMEAS;     /* 워밍업 뒤 구간만 측정 */
   const QP=Math.max(2, qmax|0 || 8);               /* 내보내기와 같은 큐 깊이 */
   let best=null; const log=[];
-  const budget=performance.now()+7000;             /* 프로브 전체 상한 */
+  const budget=performance.now()+9000;             /* 프로브 전체 상한 (후보 6개) */
   for(const {acc,mode} of cands){
     const cfg={...baseCfg, latencyMode:mode};
     if(acc) cfg.hardwareAcceleration=acc;
@@ -3915,7 +3921,18 @@ function updateTlSel(){
     el.querySelector('.selLab').textContent=`내보낼 구간 ${fmtT(exp.start)} ~ ${fmtT(exp.end)}`;
   }else el.style.display='none';
 }
-function clearTlSel(){ exp.start=0; exp.end=0; updateTlSel(); setStatus('내보내기 구간 해제 — 전체가 인코딩됩니다.'); }
+function clearTlSel(){ exp.start=0; exp.end=0; shortsPick=-1; updateTlSel();
+  if(typeof renderShortsList==='function') renderShortsList();
+  setStatus('내보내기 구간 해제 — 전체가 인코딩됩니다.'); }
+/* 타임라인에서 구간을 잡거나 손잡이로 늘리면, 쇼츠 목록에서 고른 항목도 같이 바뀐다 */
+function syncPickedShortFromRange(){
+  if(typeof shortsPick!=='number' || shortsPick<0) return;
+  const it=shortsQueue[shortsPick]; if(!it) return;
+  if(!(exp.end>exp.start+.05)) return;
+  it.start=+exp.start.toFixed(2);
+  it.dur=+(exp.end-exp.start).toFixed(2);
+  renderShortsList();
+}
 
 /* 룰러/레인 공용: 드래그=내보내기 구간 선택, 클릭=onClick(시킹 등) */
 let rangeSel=null;
@@ -3944,7 +3961,7 @@ function rangeSelUp(e){
   if(!S) return;
   if(S.mode==='pending'){ if(S.onClick) S.onClick(e); }
   else if(exp.end-exp.start<0.15){ clearTlSel(); }
-  else { seekTo(exp.start);
+  else { seekTo(exp.start); syncPickedShortFromRange();
     setStatus(`내보낼 구간 선택: ${fmtT(exp.start)} ~ ${fmtT(exp.end)} (${fmtT(exp.end-exp.start)}) — 「내보내기」 하면 이 구간만 인코딩됩니다.`); }
 }
 /* 구간 밴드: ✕ 해제 + 시작/끝 핸들 드래그로 늘리고 줄이기 */
@@ -3956,11 +3973,12 @@ function selHandleDown(e, side){
     const dur=tlDuration(), t=Math.max(0,Math.min(dur,laneT(ev.clientX)));
     if(side==='l') exp.start=Math.max(0,Math.min(t, exp.end-0.1));
     else exp.end=Math.min(dur,Math.max(t, exp.start+0.1));
-    updateTlSel();
+    updateTlSel(); syncPickedShortFromRange();
   };
   const up=ev=>{
     document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); document.removeEventListener('pointercancel',up);
     seekTo(side==='l'?exp.start:exp.end);
+    syncPickedShortFromRange();
     setStatus(`내보낼 구간 ${fmtT(exp.start)} ~ ${fmtT(exp.end)} (${fmtT(exp.end-exp.start)})`);
   };
   document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); document.addEventListener('pointercancel',up);
@@ -9279,13 +9297,19 @@ function renderShortsList(){
       return (c? clipEnd(c) : tlDuration())-it.start; };
     const tm=row.querySelector('.tm'); tm.value=fmtT(it.start);
     const dl=row.querySelector('.dl'); dl.value=Math.round(it.dur);
+    /* 시작·길이를 고치면 타임라인 구간 표시도 그대로 따라간다 */
+    const syncRange=()=>{ if(shortsPick===i) showShortsRange(i); else renderShortsList(); };
     tm.addEventListener('change',()=>{ const v=parseT(tm.value);
       if(!isNaN(v)) it.start=clamp(v,0,Math.max(0,tlDuration()-1));
       tm.value=fmtT(it.start);
-      it.dur=clamp(it.dur,3,Math.max(3,maxDurOf())); dl.value=Math.round(it.dur); });
-    dl.addEventListener('change',()=>{                 /* 곡마다 길이를 따로 정할 수 있다 */
-      const v=+dl.value; if(!isNaN(v)) it.dur=clamp(v,3,Math.max(3,maxDurOf()));
-      dl.value=Math.round(it.dur); });
+      it.dur=clamp(it.dur,3,Math.max(3,maxDurOf())); dl.value=Math.round(it.dur);
+      syncRange(); });
+    const applyDur=()=>{ const v=+dl.value; if(!isNaN(v)) it.dur=clamp(v,3,Math.max(3,maxDurOf()));
+      dl.value=Math.round(it.dur); syncRange(); };
+    dl.addEventListener('change',applyDur);
+    dl.addEventListener('input',()=>{ const v=+dl.value;      /* ▲▼ 로 올릴 때도 즉시 */
+      if(!isNaN(v)&&v>=3) { it.dur=clamp(v,3,Math.max(3,maxDurOf()));
+        if(shortsPick===i) showShortsRange(i); } });
     row.querySelector('.here').onclick=()=>{
       it.start=+clamp(state.time,0,Math.max(0,tlDuration()-1)).toFixed(2);
       it.dur=clamp(it.dur, 3, Math.max(3, maxDurOf()));   /* 길이는 사용자가 정한 값 유지 */
@@ -9318,8 +9342,8 @@ let shortsPick=-1;
 function showShortsRange(i){
   const it=shortsQueue[i]; if(!it) return;
   const dur=tlDuration();
-  const want=clamp(+$('shLen').value||30,10,60);
-  const len=Math.min(it.dur||want, want, Math.max(.2, dur-it.start));
+  /* 항목마다 정한 길이를 그대로 쓴다 — 위의 기본 길이에 눌리면 손으로 올린 값이 무시된다 */
+  const len=Math.min(it.dur||30, Math.max(.2, dur-it.start));
   exp.start=clamp(it.start,0,Math.max(0,dur-.1));
   exp.end=clamp(it.start+len, exp.start+.1, dur);
   shortsPick=i;
@@ -9378,6 +9402,7 @@ $('shExportAll').onclick=async()=>{
   const T2=state.tracks.find(t=>t.kind==='over');
   const fadeS=clamp(+$('shFade').value||0, 0, 3);
   const want=clamp(+$('shLen').value||30,5,180);   /* 새 항목의 기본 길이 */
+  const savedLoop=exp.loop; exp.loop=1;         /* 쇼츠는 반복 없이 한 벌씩 */
   const savedRange={start:exp.start,end:exp.end,fi:exp.fadeIn,fo:exp.fadeOut,
                     w:exp.w,h:exp.h,scale:exp.scale,fps:exp.fps};
   /* 목록 전체에 같은 해상도·화질·프레임을 쓴다 */
@@ -9415,6 +9440,7 @@ $('shExportAll').onclick=async()=>{
     await yieldTask();
   }
   batchMode=false; exportNameOverride='';
+  exp.loop=savedLoop;
   Object.assign(exp,{start:savedRange.start,end:savedRange.end,fadeIn:savedRange.fi,fadeOut:savedRange.fo,
                      w:savedRange.w,h:savedRange.h,scale:savedRange.scale,fps:savedRange.fps});
   renderAll();
