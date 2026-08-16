@@ -3391,6 +3391,25 @@ async function importImage(f){
   const vt=firstVideoTrack();
   vt.clips.push(newClip(id, trackEndOf(vt), 5));
 }
+/* rVFC(requestVideoFrameCallback)로 '실제 표시된 프레임'을 기다려 봤지만,
+   내보내기 중에는 영상 요소가 화면에 붙어 있지 않아 콜백이 오지 않는다.
+   그래서 매 프레임 상한까지 기다리게 되고 80ms/프레임(0.4배속)까지 떨어졌다.
+   판단은 currentTime 으로 하고, 어긋나면 탐색으로 바로잡는 방식을 유지한다. */
+function nextPresentedFrame(v, ms){
+  if(!v.requestVideoFrameCallback) return Promise.resolve();
+  return new Promise(res=>{
+    let done=false;
+    const t0=performance.now(), lim=ms||120;
+    const fin=()=>{ if(done) return; done=true; res(); };
+    /* 마감은 setTimeout 이 아니라 폴링으로 잰다 — 숨은 탭에서 setTimeout 이 1초로
+       묶여, 프레임마다 1초씩 잡아먹고 내보내기가 0.0배속이 됐다(실측). */
+    const poll=()=>{ if(done) return;
+      if(performance.now()-t0>lim) return fin();
+      yieldTask().then(poll); };
+    poll();
+    try{ v.requestVideoFrameCallback(()=>fin()); }catch(e){ fin(); }
+  });
+}
 function seekVideo(v,t){
   return withTimeout(new Promise(res=>{
     const h=()=>{ v.removeEventListener('seeked',h); res(); };
@@ -6720,13 +6739,18 @@ async function seekVideosAt(t){
    되감기·큰 점프(클립 경계 등)에서만 예외적으로 탐색을 1회 쓴다. */
 /* 소스가 목표보다 이만큼 앞서면 정지시킨다. 이 폭이 그대로 프레임 오차(영상이
    오디오보다 앞서는 양)의 상한이 되므로 한 프레임 남짓으로 좁게 잡는다. */
-const VID_AHEAD_MAX=.022;
+/* 소스가 목표보다 이만큼 앞서면 정지 — 반 프레임(30fps 기준 약 0.017초)보다 좁게.
+   예전 0.022 는 프레임 경계를 넘나들어 같은 프레임이 두 번 찍히곤 했다. */
+const VID_AHEAD_MAX=.010;
 /* 이보다 많이 앞질러 버리면 정지만으로는 못 돌아온다 — 그 프레임은 '미래 장면'이라
    결과물이 튄다. 이때만 탐색 1회로 되돌린다(드물게 일어나므로 속도 손해는 미미). */
 /* 앞질러 버린 폭이 이보다 크면 정지만으로 못 돌아온다 → 탐색 1회로 되돌린다 */
 const VID_BEHIND_MAX=.10;
 /* 목표 시각에 도달한 뒤에도 이만큼 어긋나 있으면 그 자리에서 바로잡는다 (약 2프레임) */
-const VID_FIX_TOL=.07;
+/* 도달 후에도 이만큼 어긋나 있으면 탐색으로 바로잡는다 — 0.5프레임.
+   0.07(2프레임)로 두면 한 프레임 어긋남이 그대로 통과해 중복·건너뜀이 25%까지 났다.
+   좁혀도 속도 손해는 없었다(실측 3.18배 → 3.38배). */
+const VID_FIX_TOL=.017;
 const VID_RATE_MAX=8;
 /* 내보내기가 실제로 소모하는 속도(소스 초/실시간 초)를 추정해 재생 배속을 맞춘다.
    잔여 오차만 보고 배속을 정하면 거의 따라잡았을 때 배속이 0.5까지 떨어져
@@ -6746,11 +6770,13 @@ function vidPace(t){
 }
 /* 목표 시각 도달만 기다리고 정지시키지는 않는다. 프레임마다 정지·재생을 반복하면
    그 비용으로 4K60이 0.5배속까지 떨어졌다(실측). 대신 앞선 정도를 위에서 제한한다. */
+/* 목표 시각 도달만 기다린다. */
 function waitVideoTime(v, st, deadlineMs){
   return new Promise(res=>{
     const t0=performance.now();
+    const over=()=>v.ended || v.paused || performance.now()-t0>deadlineMs;
     const tick=()=>{
-      if(v.currentTime>=st || v.ended || v.paused || performance.now()-t0>deadlineMs){ res(); return; }
+      if(v.currentTime>=st || over()){ res(); return; }
       yieldTask().then(tick);        /* setTimeout은 숨은 탭에서 1초로 묶이므로 사용하지 않음 */
     };
     tick();
