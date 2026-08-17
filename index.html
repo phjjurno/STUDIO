@@ -9604,6 +9604,9 @@ $('shExportAll').onclick=async()=>{
   const fadeS=clamp(+$('shFade').value||0, 0, 3);
   const want=clamp(+$('shLen').value||30,5,180);   /* 새 항목의 기본 길이 */
   const savedLoop=exp.loop; exp.loop=1;         /* 쇼츠는 반복 없이 한 벌씩 */
+  /* 반복 입력칸도 1로 보여 준다 — 내부값만 바꾸면 칸에 예전 숫자가 남아
+     반복이 켜진 것처럼 오해된다 (사용자 지적). 끝나면 원래 숫자로 되돌린다. */
+  $('expLoop').value=1; expEst();
   const savedRange={start:exp.start,end:exp.end,fi:exp.fadeIn,fo:exp.fadeOut,
                     w:exp.w,h:exp.h,scale:exp.scale,fps:exp.fps};
   /* 목록 전체에 같은 해상도·화질·프레임을 쓴다 */
@@ -9615,7 +9618,7 @@ $('shExportAll').onclick=async()=>{
     if(shortsAbort) break;
     const it=shortsQueue[i];
     shortsQueue.forEach(x=>x.cur=false); it.cur=true; renderShortsList();
-    $('shProg').innerHTML=`<b style="color:var(--amber)">${i+1}/${shortsQueue.length}</b> — “${it.hook||it.title}” 인코딩 중…`;
+    $('shProg').innerHTML=`<b style="color:var(--amber)">${i+1}/${shortsQueue.length}</b> — “${it.hook||it.title}” 인코딩 중… <span style="color:var(--dim)">· 반복 없이 1회</span>`;
     /* 후킹 오버레이 삽입 */
     let hookClip=null;
     const segLen=Math.max(3, it.dur||want);        /* 길이는 줄마다 정한 값을 그대로 쓴다 */
@@ -9642,6 +9645,7 @@ $('shExportAll').onclick=async()=>{
   }
   batchMode=false; exportNameOverride='';
   exp.loop=savedLoop;
+  $('expLoop').value=savedLoop; expEst();       /* 반복 입력칸 원래 숫자로 복원 */
   Object.assign(exp,{start:savedRange.start,end:savedRange.end,fadeIn:savedRange.fi,fadeOut:savedRange.fo,
                      w:savedRange.w,h:savedRange.h,scale:savedRange.scale,fps:savedRange.fps});
   renderAll();
