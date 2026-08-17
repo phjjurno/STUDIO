@@ -305,12 +305,13 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
 
       <div class="opt-label">곡 사이 전환음</div>
+      <div class="hint2">곡과 곡 사이마다 한 번씩, <b>첫 곡은 시작 전에</b> 테이프 효과음이 들어갑니다. 카세트가 들어가 앉는 소리가 곡 시작에 맞춰지고, 타이밍으로 앞뒤 미세 조정할 수 있어요.</div>
       <div class="row" style="gap:6px;align-items:center">
         <button class="chip" id="tapeBtn">📼 전환음 켜기</button>
         <button class="chip" id="tapeTest">▶ 들어보기</button>
       </div>
       <div class="sliders">
-        <div class="slider"><label>길이 <span class="slider-rhs"><b id="tapeDurV" style="display:none">1.0</b><input type="number" class="snum" id="tapeDurN" min="30" max="200" value="100"><small class="usuf">/100초</small></span></label>
+        <div class="slider"><label>타이밍 <span class="slider-rhs"><b id="tapeDurV" style="display:none">0</b><input type="number" class="snum" id="tapeDurN" min="30" max="200" value="100"><small class="usuf">100=제자리</small></span></label>
           <input type="range" id="tapeDur" min="30" max="200" value="100"></div>
         <div class="slider"><label>소리 크기 <span class="slider-rhs"><b id="tapeVolV" style="display:none">55%</b><input type="number" class="snum" id="tapeVolN" min="0" max="100" value="55"><small class="usuf">%</small></span></label>
           <input type="range" id="tapeVol" min="0" max="100" value="55"></div>
@@ -2959,7 +2960,7 @@ const state = {
        lp:{x:.5,y:.5,scale:1,opacity:1,bright:1,con:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
-  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, dur:1.0, vol:.55}, linkAssets:false, missingAssets:null,
+  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, shift:0, vol:.55, lead:0}, linkAssets:false, missingAssets:null,
   glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
@@ -3479,8 +3480,21 @@ function plRepack(){
   const tr=plTrack(); if(!tr) return;
   /* 재생목록 순서는 tr.clips 배열 순서가 기준 — start는 순서대로 재계산
      (sortedClips로 정렬하면 방금 바꾼 순서가 옛 start값으로 되돌아감) */
-  let acc=0;
+  let acc=(state.tape&&state.tape.on)? clamp(state.tape.lead||0,0,6) : 0;
   for(const c of tr.clips){ c.start=acc; acc+=c.dur; }
+}
+/* 첫 곡 앞 여백 — 전환음이 첫 곡 시작 전에 온전히 들어갈 자리를 만든다.
+   재생목록만 밀면 자막·영상이 어긋나므로 다른 트랙도 같은 양만큼 함께 민다. */
+function applyTapeLead(sec){
+  const old=clamp(state.tape.lead||0,0,6), next=clamp(sec,0,6), d=next-old;
+  state.tape.lead=next;
+  if(Math.abs(d)>1e-6){
+    for(const tr of state.tracks){
+      if(tr.pl) continue;                       /* 재생목록은 아래 plRepack이 다시 계산 */
+      for(const c of tr.clips) c.start=Math.max(0,c.start+d);
+    }
+  }
+  plRepack();
 }
 let snippetSrc=null;
 function stopSnippet(){ try{ snippetSrc&&snippetSrc.stop(); }catch(e){} snippetSrc=null; }
@@ -4170,14 +4184,25 @@ function syncTapeUI(){
   b.classList.toggle('on',on);
   b.textContent = on? '📼 전환음 켜짐' : '📼 전환음 켜기';
 }
-$('tapeBtn').onclick=()=>{ state.tape.on=!state.tape.on; syncTapeUI();
-  setStatus(state.tape.on? '곡이 바뀔 때 테이프 도는 소리를 넣습니다.' : '전환음을 끕니다.'); };
-$('tapeTest').onclick=()=>{ ensureCtx(); stopSnippet();
-  const src=actx.createBufferSource(); src.buffer=tapeBuffer(actx, clamp(state.tape.dur||.5,.15,2));
+$('tapeBtn').onclick=async()=>{
+  markUndo();
+  state.tape.on=!state.tape.on; syncTapeUI();
+  if(state.tape.on){ ensureCtx(); await ensureTape(actx); }     /* 재생 전에 미리 받아 둔다 */
+  applyTapeLead(state.tape.on? TAPE_ANCHOR : 0);                /* 첫 곡 앞 여백 확보/해제 */
+  renderAll();
+  setStatus(state.tape.on
+    ? `곡과 곡 사이마다, 첫 곡은 시작 전에 전환음을 넣습니다 — 첫 곡 앞에 ${TAPE_ANCHOR.toFixed(1)}초 여백을 만들었습니다.`
+    : '전환음을 껐습니다 — 첫 곡 앞 여백도 되돌렸습니다.'); };
+$('tapeTest').onclick=async()=>{
+  ensureCtx(); pause(); stopSnippet();
+  const buf=await ensureTape(actx);
+  if(!buf){ setStatus('전환음 파일을 불러오지 못했습니다.'); return; }
+  const src=actx.createBufferSource(); src.buffer=buf;
   const gn=actx.createGain(); gn.gain.value=clamp(state.tape.vol??.55,0,1);
-  src.connect(gn); gn.connect(actx.destination); src.start();
-  snippetSrc=src; };
-bindSlider('tapeDur','tapeDurV',v=>{ state.tape.dur=v/100; tapeCache.clear(); },'');
+  src.connect(gn); gn.connect(actx.destination);
+  src.onended=()=>{ if(snippetSrc===src) snippetSrc=null; };   /* 끝나면 참조 정리 */
+  src.start(); snippetSrc=src; };
+bindSlider('tapeDur','tapeDurV',v=>{ state.tape.shift=(v-100)/100; },'');
 bindSlider('tapeVol','tapeVolV',v=>state.tape.vol=v/100);
 syncTapeUI();
 /* 지정한 시각에서 클립을 자른다 (가위·분할 공통) */
@@ -6608,106 +6633,27 @@ function scheduleClip(ctx, dest, c, base, t0){
    ④ 모터 스타트 — 미세한 워우(피치 흔들림)가 실린 히스
    마지막에 1극 저역통과 두 번 + 테이프 새츄레이션 + 바닥 히스를 얹어
    전체를 부드럽게 만다. */
-const tapeCache=new Map();
-function tapeBuffer(ctx, sec){
-  const sr=ctx.sampleRate, key=sr+'|'+sec.toFixed(2);
-  if(tapeCache.has(key)) return tapeCache.get(key);
-  const n=Math.max(1,Math.round(sec*sr));
-  const buf=ctx.createBuffer(2, n, sr);
-  const L=buf.getChannelData(0), Rc=buf.getChannelData(1);
-  const P=f=>Math.round(f*n);
-  /* Artlist "Eject and Insert Tape" 레퍼런스 흐름:
-     ① eject 버튼 눌림 → ② 스프링 튕기며 도어 열림 → ③ 카세트 빠져나옴(마찰+끝 탁)
-     → ④ 교체 정적 → ⑤ 새 카세트 밀어 넣음 → ⑥ 안착 '컹'(seam 지점)
-     → ⑦ 도어 닫힘 래치 → ⑧ 모터 스핀업.
-     위치는 전체 길이의 분수라 길이를 바꿔도 비율이 유지된다.
-     0.62 지점이 곡 시작(seam)에 오도록 스케줄되므로 안착을 그 자리에 둔다. */
-  const g=Math.round(.030*sr);                     /* 2단 클릭 간격 */
-  const tEj  =P(.03),  tEj2=tEj+g;                 /* eject 버튼(2단) */
-  const tPop =P(.075);                             /* 스프링·도어 팝 */
-  const tOut0=P(.085), tOut1=P(.27), tOutTap=P(.275);  /* 빠져나옴 */
-  const tIn0 =P(.45),  tIn1=P(.62);                /* 밀어 넣음 */
-  const tSeat=P(.62);                              /* 안착(=seam) */
-  const tLat =P(.635), tLat2=tLat+g;              /* 도어 래치(2단) */
-  const tMot =P(.665);                             /* 모터 */
-
-  /* 몸통 울림 — 비화성 배음을 감쇠시켜 플라스틱·금속의 '통' 소리를 만든다 */
-  const body=(d,parts)=>{ let v=0;
-    for(const [f,amp,dec] of parts) v+=Math.sin(d*2*Math.PI*f)*amp*Math.exp(-d*dec);
-    return v; };
-
-  const raw=new Float32Array(n);
-  let lpOut=0, lpIn=0, lpMot=0, lpPop=0, wow=0;
-  for(let i=0;i<n;i++){
-    const t=i/sr;
-    let v=0;
-    /* ① eject 버튼 — 딱딱한 2단 클릭(눌림 → 기구 트립) */
-    { const d=(i-tEj)/sr;
-      if(d>=0&&d<.14) v+=body(d,[[150,.42,32],[560,.34,110],[980,.20,150]]); }
-    { const d=(i-tEj2)/sr;
-      if(d>=0&&d<.10) v+=body(d,[[132,.30,40],[720,.20,150]]); }
-    /* ② 스프링 튕김 + 도어 팝 — 짧은 금속 링 + 저역 노이즈 '풉' */
-    { const d=(i-tPop)/sr;
-      if(d>=0&&d<.09){
-        v+=Math.sin(d*2*Math.PI*2400)*.055*Math.exp(-d*190);    /* 스프링 링 */
-        const wn=Math.random()*2-1; lpPop+=(wn-lpPop)*.10;
-        v+=lpPop*.22*Math.exp(-d*46);
-      } }
-    /* ③ 카세트 빠져나옴 — 저역 마찰이 서서히, 끝에서 '탁' 걸림 */
-    if(i>=tOut0&&i<tOutTap){
-      const u=(i-tOut0)/Math.max(1,tOutTap-tOut0);
-      const wn=Math.random()*2-1; lpOut+=(wn-lpOut)*.05;
-      v+=lpOut*.30*Math.sin(Math.PI*u)*(.4+.6*u);
-    }
-    { const d=(i-tOutTap)/sr;
-      if(d>=0&&d<.12) v+=body(d,[[120,.26,44],[300,.12,90]]); }   /* 끝 탁 */
-    /* ④ 교체 정적 — 이 구간은 별도 소리 없이 바닥 히스만 (아래 공통) */
-    /* ⑤ 새 카세트 밀어 넣음 — 마찰이 안착을 향해 커진다 */
-    if(i>=tIn0&&i<tIn1){
-      const u=(i-tIn0)/Math.max(1,tIn1-tIn0);
-      const wn=Math.random()*2-1; lpIn+=(wn-lpIn)*.055;
-      v+=lpIn*.40*Math.sin(Math.PI*u*.5+.0)*(.3+.7*u);
-    }
-    /* ⑥ 안착 '컹' — 묵직한 저역 몸통 (seam 지점) */
-    { const d=(i-tSeat)/sr;
-      if(d>=0&&d<.36) v+=body(d,[[60,.60,16],[92,.34,24],[168,.18,42],[300,.08,72]]); }
-    /* ⑦ 도어 닫힘 래치 — 2단으로 걸린다 */
-    { const d=(i-tLat)/sr;
-      if(d>=0&&d<.20) v+=body(d,[[520,.28,95],[880,.18,140],[132,.38,30]]); }
-    { const d=(i-tLat2)/sr;
-      if(d>=0&&d<.16) v+=body(d,[[430,.18,120],[1150,.10,190],[110,.20,38]]); }
-    /* ⑧ 모터 스핀업 — 워우 실린 히스 + 낮은 회전음, 서서히 오른다 */
-    if(i>=tMot){
-      const u=(i-tMot)/Math.max(1,n-tMot);
-      const wn=Math.random()*2-1; lpMot+=(wn-lpMot)*.045;
-      wow+=(3.1+.9*Math.sin(t*7.7))/sr;
-      v+=lpMot*.24*Math.min(1,u*4)*(1-u*.55);
-      v+=Math.sin(wow*2*Math.PI*14)*.055*Math.min(1,u*3)*(1-u*.65);
-    }
-    /* 바닥 히스 — 아주 작게 깔아 두면 합성 티가 덜 난다 */
-    v+=(Math.random()*2-1)*.008;
-    raw[i]=v;
-  }
-  /* 저역통과 두 번 — 디지털한 잔가시를 걷어낸다 */
-  let f1=0, f2=0;
-  const k=Math.min(.5, 2600/sr*2.2);
-  for(let i=0;i<n;i++){ f1+=(raw[i]-f1)*k; f2+=(f1-f2)*k; raw[i]=f2*1.9; }
-  /* 새츄레이션 + 앞뒤 자연스러운 여닫이 */
-  for(let i=0;i<n;i++){
-    const env=Math.min(1,i/(sr*.012))*Math.min(1,(n-i)/(sr*.08));
-    const v=Math.tanh(raw[i]*1.6)*.78*env;
-    L[i]=v;
-    Rc[i]=v*.92+(Math.random()*2-1)*.006*env;            /* 살짝 벌린 스테레오 */
-  }
-  tapeCache.set(key,buf);
-  return buf;
+/* 곡 사이 전환음 — 직접 만든 테이프 효과음 파일을 쓴다.
+   합성음은 아무리 다듬어도 진짜 카세트 소리를 못 따라가서 파일로 바꿨다.
+   파일은 4.57초이고, 카세트가 안착하는 '컹' 소리가 2.49초 지점에 있다.
+   그 지점이 곡 시작에 오도록 배치한다. */
+const TAPE_SRC='assets/transition.m4a';
+const TAPE_ANCHOR=2.49;                 /* 안착 클릭 위치(초) */
+let tapeRaw=null; const tapeBufs=new Map();
+async function ensureTape(ctx){
+  const sr=ctx.sampleRate;
+  if(tapeBufs.has(sr)) return tapeBufs.get(sr);
+  try{
+    if(!tapeRaw) tapeRaw=await (await fetch(TAPE_SRC)).arrayBuffer();
+    const buf=await ctx.decodeAudioData(tapeRaw.slice(0));
+    tapeBufs.set(sr,buf); return buf;
+  }catch(err){ console.error('transition sound',err); tapeBufs.set(sr,null); return null; }
 }
-/* 곡이 '진짜로' 바뀌는 지점만 고른다.
-   가위로 자르거나 복제하면 재생목록 클립 수만 늘어날 뿐 곡은 그대로다.
-   예전엔 클립 경계마다 소리를 넣어 한 곡 안에서도 계속 울렸다. */
+const tapeBufFor=ctx=>tapeBufs.get(ctx.sampleRate)||null;
 function tapeSeams(){
   const cs=plClips(); const out=[];
-  const sec=clamp((state.tape&&state.tape.dur)||.6,.15,2);
+  const sec=1.2;                          /* 너무 붙은 경계를 걸러내는 최소 간격 */
+  if(cs.length) out.push(cs[0].start);    /* 첫 곡은 시작 전에도 한 번 */
   for(let i=1;i<cs.length;i++){
     const prev=cs[i-1], cur=cs[i];
     if(prev.assetId && prev.assetId===cur.assetId){
@@ -6721,11 +6667,13 @@ function tapeSeams(){
   return out;
 }
 function scheduleTape(ctx, dest, base, t0, until){
-  if(!state.tape || !state.tape.on) return;
-  const sec=clamp(state.tape.dur||.5,.15,2), vol=clamp(state.tape.vol??.55,0,1);
-  const buf=tapeBuffer(ctx, sec);
+  const made=[];
+  if(!state.tape || !state.tape.on) return made;
+  const buf=tapeBufFor(ctx); if(!buf) return made;        /* 아직 안 불러왔으면 건너뜀 */
+  const sec=buf.duration, vol=clamp(state.tape.vol??.55,0,1);
+  const shift=clamp(state.tape.shift||0,-2,2);           /* 타이밍 미세 조정 */
   for(const seam of tapeSeams()){
-    const at=seam-sec*.62;                       /* 딸깍이 곡 시작 직전에 오도록 */
+    const at=seam-TAPE_ANCHOR+shift;                     /* 안착 소리가 곡 시작에 오도록 */
     if(at+sec<=base) continue;
     if(until!=null && at>=until) continue;
     const src=ctx.createBufferSource(); src.buffer=buf;
@@ -6733,11 +6681,14 @@ function scheduleTape(ctx, dest, base, t0, until){
     src.connect(gn); gn.connect(dest);
     const lead=at-base;
     if(lead>=0) src.start(t0+lead);
-    else src.start(t0, Math.min(sec-.001, -lead));   /* 이미 시작된 중간부터 */
+    else src.start(t0, Math.min(sec-.001, -lead));       /* 첫 곡처럼 앞이 잘리면 중간부터 */
+    made.push(src);
   }
+  return made;
 }
 async function mixAudio(sr, ch, dur){
   const off=new OfflineAudioContext(ch, Math.max(sr, Math.ceil(dur*sr)), sr);
+  if(state.tape&&state.tape.on) await ensureTape(off);   /* 이 샘플레이트로 디코드 */
   for(const c of audioClipsAll()) scheduleClip(off, off.destination, c, 0, 0);
   scheduleTape(off, off.destination, 0, 0, dur);
   return off.startRendering();
@@ -6746,6 +6697,7 @@ async function mixAudio(sr, ch, dur){
 async function mixAudioRange(sr, ch, from, to){
   const len=Math.max(1, Math.ceil((to-from)*sr));
   const off=new OfflineAudioContext(ch, len, sr);
+  if(state.tape&&state.tape.on) await ensureTape(off);   /* 이 샘플레이트로 디코드 */
   for(const c of audioClipsAll()){
     if(clipEnd(c)<=from || c.start>=to) continue;      /* 구간 밖 클립은 스킵 */
     scheduleClip(off, off.destination, c, from, 0);
@@ -6929,7 +6881,9 @@ function play(){
     const s=scheduleClip(actx, mixBus, c, playBase, playT0);
     if(s) playSources.push(s);
   }
-  scheduleTape(actx, mixBus, playBase, playT0, null);
+  /* 전환음 소스도 playSources에 담아야 pause()에서 멈춘다.
+     예전엔 담지 않아 정지·미리듣기 뒤에도 예약된 소리가 계속 튀어나왔다. */
+  for(const s2 of scheduleTape(actx, mixBus, playBase, playT0, null)) playSources.push(s2);
   $('playBtn').textContent='⏸'; $('stopBtn').style.display='';
   rafLoop();
 }
@@ -10280,6 +10234,7 @@ async function makeStash(){
 async function startExport(){
   if(state.rendering) return;
   pause(); stopSnippet(); ensureCtx();
+  if(state.tape&&state.tape.on) await ensureTape(actx);   /* 전환음 파일 준비 */
   const dur=tlDuration();
   if(dur<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
   if(!(window.VideoEncoder && window.AudioEncoder && window.Mp4Muxer)){
