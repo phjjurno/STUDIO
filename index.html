@@ -310,8 +310,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" id="tapeTest">▶ 들어보기</button>
       </div>
       <div class="sliders">
-        <div class="slider"><label>길이 <span class="slider-rhs"><b id="tapeDurV" style="display:none">0.5</b><input type="number" class="snum" id="tapeDurN" min="30" max="200" value="60"><small class="usuf">/100초</small></span></label>
-          <input type="range" id="tapeDur" min="30" max="200" value="60"></div>
+        <div class="slider"><label>길이 <span class="slider-rhs"><b id="tapeDurV" style="display:none">1.0</b><input type="number" class="snum" id="tapeDurN" min="30" max="200" value="100"><small class="usuf">/100초</small></span></label>
+          <input type="range" id="tapeDur" min="30" max="200" value="100"></div>
         <div class="slider"><label>소리 크기 <span class="slider-rhs"><b id="tapeVolV" style="display:none">55%</b><input type="number" class="snum" id="tapeVolN" min="0" max="100" value="55"><small class="usuf">%</small></span></label>
           <input type="range" id="tapeVol" min="0" max="100" value="55"></div>
       </div>
@@ -2950,7 +2950,7 @@ const state = {
        lp:{x:.5,y:.5,scale:1,opacity:1,bright:1,con:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
-  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, dur:.6, vol:.55}, linkAssets:false, missingAssets:null,
+  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, dur:1.0, vol:.55}, linkAssets:false, missingAssets:null,
   glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
@@ -6588,7 +6588,20 @@ function tapeBuffer(ctx, sec){
   const buf=ctx.createBuffer(2, n, sr);
   const L=buf.getChannelData(0), Rc=buf.getChannelData(1);
   const P=f=>Math.round(f*n);
-  const tIns0=0, tIns1=P(.30), tSeat=P(.30), tBtn=P(.58), tMot=P(.62);
+  /* Artlist "Eject and Insert Tape" 레퍼런스 흐름:
+     ① eject 버튼 눌림 → ② 스프링 튕기며 도어 열림 → ③ 카세트 빠져나옴(마찰+끝 탁)
+     → ④ 교체 정적 → ⑤ 새 카세트 밀어 넣음 → ⑥ 안착 '컹'(seam 지점)
+     → ⑦ 도어 닫힘 래치 → ⑧ 모터 스핀업.
+     위치는 전체 길이의 분수라 길이를 바꿔도 비율이 유지된다.
+     0.62 지점이 곡 시작(seam)에 오도록 스케줄되므로 안착을 그 자리에 둔다. */
+  const g=Math.round(.030*sr);                     /* 2단 클릭 간격 */
+  const tEj  =P(.03),  tEj2=tEj+g;                 /* eject 버튼(2단) */
+  const tPop =P(.075);                             /* 스프링·도어 팝 */
+  const tOut0=P(.085), tOut1=P(.27), tOutTap=P(.275);  /* 빠져나옴 */
+  const tIn0 =P(.45),  tIn1=P(.62);                /* 밀어 넣음 */
+  const tSeat=P(.62);                              /* 안착(=seam) */
+  const tLat =P(.635), tLat2=tLat+g;              /* 도어 래치(2단) */
+  const tMot =P(.665);                             /* 모터 */
 
   /* 몸통 울림 — 비화성 배음을 감쇠시켜 플라스틱·금속의 '통' 소리를 만든다 */
   const body=(d,parts)=>{ let v=0;
@@ -6596,31 +6609,52 @@ function tapeBuffer(ctx, sec){
     return v; };
 
   const raw=new Float32Array(n);
-  let lpA=0, lpB=0, wow=0;
+  let lpOut=0, lpIn=0, lpMot=0, lpPop=0, wow=0;
   for(let i=0;i<n;i++){
     const t=i/sr;
     let v=0;
-    /* ① 슬롯 마찰 — 저역만 남긴 잡음, 밀어 넣는 동안 서서히 */
-    if(i<tIns1){
-      const u=i/Math.max(1,tIns1);
-      const wn=Math.random()*2-1; lpA+=(wn-lpA)*.055;
-      v+=lpA*.42*Math.sin(Math.PI*u)*(0.3+0.7*u);
+    /* ① eject 버튼 — 딱딱한 2단 클릭(눌림 → 기구 트립) */
+    { const d=(i-tEj)/sr;
+      if(d>=0&&d<.14) v+=body(d,[[150,.42,32],[560,.34,110],[980,.20,150]]); }
+    { const d=(i-tEj2)/sr;
+      if(d>=0&&d<.10) v+=body(d,[[132,.30,40],[720,.20,150]]); }
+    /* ② 스프링 튕김 + 도어 팝 — 짧은 금속 링 + 저역 노이즈 '풉' */
+    { const d=(i-tPop)/sr;
+      if(d>=0&&d<.09){
+        v+=Math.sin(d*2*Math.PI*2400)*.055*Math.exp(-d*190);    /* 스프링 링 */
+        const wn=Math.random()*2-1; lpPop+=(wn-lpPop)*.10;
+        v+=lpPop*.22*Math.exp(-d*46);
+      } }
+    /* ③ 카세트 빠져나옴 — 저역 마찰이 서서히, 끝에서 '탁' 걸림 */
+    if(i>=tOut0&&i<tOutTap){
+      const u=(i-tOut0)/Math.max(1,tOutTap-tOut0);
+      const wn=Math.random()*2-1; lpOut+=(wn-lpOut)*.05;
+      v+=lpOut*.30*Math.sin(Math.PI*u)*(.4+.6*u);
     }
-    /* ② 안착 '컹' — 낮은 몸통 + 살짝 위 배음 */
+    { const d=(i-tOutTap)/sr;
+      if(d>=0&&d<.12) v+=body(d,[[120,.26,44],[300,.12,90]]); }   /* 끝 탁 */
+    /* ④ 교체 정적 — 이 구간은 별도 소리 없이 바닥 히스만 (아래 공통) */
+    /* ⑤ 새 카세트 밀어 넣음 — 마찰이 안착을 향해 커진다 */
+    if(i>=tIn0&&i<tIn1){
+      const u=(i-tIn0)/Math.max(1,tIn1-tIn0);
+      const wn=Math.random()*2-1; lpIn+=(wn-lpIn)*.055;
+      v+=lpIn*.40*Math.sin(Math.PI*u*.5+.0)*(.3+.7*u);
+    }
+    /* ⑥ 안착 '컹' — 묵직한 저역 몸통 (seam 지점) */
     { const d=(i-tSeat)/sr;
-      if(d>=0&&d<.35) v+=body(d,[[64,.55,17],[97,.30,24],[173,.16,40],[318,.07,70]]); }
-    /* ③ 버튼 래치 — 두 단으로 걸리는 소리, 각각 짧은 몸통 울림 */
-    { const d=(i-tBtn)/sr;
-      if(d>=0&&d<.22) v+=body(d,[[520,.30,95],[880,.20,140],[132,.42,30]]); }
-    { const d=(i-tBtn-Math.round(.034*sr))/sr;
-      if(d>=0&&d<.18) v+=body(d,[[430,.20,120],[1150,.11,190],[110,.22,38]]); }
-    /* ④ 모터 스타트 — 워우가 실린 히스 + 아주 낮은 회전음 */
+      if(d>=0&&d<.36) v+=body(d,[[60,.60,16],[92,.34,24],[168,.18,42],[300,.08,72]]); }
+    /* ⑦ 도어 닫힘 래치 — 2단으로 걸린다 */
+    { const d=(i-tLat)/sr;
+      if(d>=0&&d<.20) v+=body(d,[[520,.28,95],[880,.18,140],[132,.38,30]]); }
+    { const d=(i-tLat2)/sr;
+      if(d>=0&&d<.16) v+=body(d,[[430,.18,120],[1150,.10,190],[110,.20,38]]); }
+    /* ⑧ 모터 스핀업 — 워우 실린 히스 + 낮은 회전음, 서서히 오른다 */
     if(i>=tMot){
       const u=(i-tMot)/Math.max(1,n-tMot);
-      const wn=Math.random()*2-1; lpB+=(wn-lpB)*.045;
-      wow+=(3.1+.9*Math.sin(t*7.7))/sr;                 /* 느린 피치 흔들림 */
-      v+=lpB*.26*Math.min(1,u*4)*(1-u*.6);
-      v+=Math.sin(wow*2*Math.PI*14)*.06*Math.min(1,u*3)*(1-u*.7);
+      const wn=Math.random()*2-1; lpMot+=(wn-lpMot)*.045;
+      wow+=(3.1+.9*Math.sin(t*7.7))/sr;
+      v+=lpMot*.24*Math.min(1,u*4)*(1-u*.55);
+      v+=Math.sin(wow*2*Math.PI*14)*.055*Math.min(1,u*3)*(1-u*.65);
     }
     /* 바닥 히스 — 아주 작게 깔아 두면 합성 티가 덜 난다 */
     v+=(Math.random()*2-1)*.008;
