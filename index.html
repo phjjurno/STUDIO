@@ -6763,19 +6763,17 @@ function syncVideos(t, playing){
     const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
     if(playing){
       v.playbackRate=clamp(c.speed,.25,4);
-      if(a.noPlay){
-        /* 재생이 막힌 소스 — 프레임마다 직접 탐색해 화면이 멈추지 않게 한다 */
-        if(Math.abs(v.currentTime-st)>.05){ try{ v.currentTime=st; }catch(e){} }
-        continue;
-      }
       if(v.paused){
-        /* play() 를 먼저 부른다. currentTime 을 바로 앞에 대입하면 그 탐색이
-           play() 를 중단시켜(AbortError) 소리만 나고 영상이 멈추는 일이 있었다.
-           시간은 많이 어긋났을 때만 맞춘다. */
+        /* play() 를 먼저 부른다. currentTime 을 바로 앞에 대입하면 그 탐색이 play 를
+           끊어(AbortError) 소리만 나고 영상이 멈추는 일이 있었다. AbortError 는 복제
+           클립 경계에서 pause→seek 직후 흔히 나는 정상 신호라 '재생 불가'로 보지 않는다.
+           예전엔 이걸 noPlay 로 잘못 켜서 이후 매 프레임 탐색으로 빠져 느려졌다. */
         const pr=v.play();
-        if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(()=>{ a.noPlay=true; });
-        if(Math.abs(v.currentTime-st)>.5){ try{ v.currentTime=st; }catch(e){} }
-      }else if(Math.abs(v.currentTime-st)>.3){ try{ v.currentTime=st; }catch(e){} }
+        if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(e=>{ if(e&&e.name!=='AbortError') a.noPlay=true; });
+      }
+      /* 프레임 정렬 — 정말 재생이 막힌 소스만 바짝(0.05) 따라가고, 보통은 크게 어긋날 때만 */
+      const tol = a.noPlay? .05 : (v.paused? .5 : .3);
+      if(Math.abs(v.currentTime-st)>tol){ try{ v.currentTime=st; }catch(e){} }
     }else if(!v.paused) v.pause();
   }
 }
@@ -6861,9 +6859,15 @@ async function advanceVideosTo(t){
     const v=a.videoEl;
     const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
     const cur=v.currentTime, drift=st-cur;
-    if(a.noPlay || drift<-.1 || drift>1.5){         /* 큰 되감기·컷 경계 점프·재생 불가 → 탐색 1회 */
+    if(drift<-.1 || drift>1.5){         /* 큰 되감기·컷 경계 점프(복제 클립 되감기 등) → 탐색 1회 */
       if(!v.paused) v.pause();
       waits.push(seekVideo(v,st));
+      continue;
+    }
+    if(a.noPlay){                        /* 재생이 정말 막힌 소스만 — 탐색으로 따라가되 재생 복구를 계속 시도 */
+      if(v.paused){ const pr=v.play();
+        if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(e=>{ if(e&&e.name!=='AbortError') a.noPlay=true; }); }
+      if(Math.abs(v.currentTime-st)>VID_FIX_TOL) waits.push(seekVideo(v,st));
       continue;
     }
     /* 많이 앞섰으면 정지해 따라오기를 기다린다. 감속만 하면 내보내기가 실시간보다
@@ -6878,7 +6882,8 @@ async function advanceVideosTo(t){
     /* 필요 처리량(추정)에 여유를 주되 상한을 낮게 잡는다. 8배까지 열어 두면 한 프레임
        그리는 동안 소스가 몇 초씩 앞질러 버려(실측 1.97초) 미래 장면이 찍혔다. */
     v.playbackRate=clamp(pace*1.35*clamp(c.speed,.25,4), .5, VID_RATE_MAX);
-    if(v.paused) v.play().catch(()=>{ a.noPlay=true; });   /* 재생이 막히면 탐색 방식으로 복귀 */
+    if(v.paused){ const pr=v.play();      /* 순차 디코딩 재생. AbortError(탐색이 play를 끊음)는 정상이라 무시 */
+      if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(e=>{ if(e&&e.name!=='AbortError') a.noPlay=true; }); }
     /* 타임아웃되면 그냥 이전 프레임을 쓰고 넘어갔었다 — 소스가 못 따라오는 구간마다
        같은 프레임이 반복돼 결과물이 버벅였다. 두 프레임 넘게 처졌으면 탐색 1회로 따라잡는다. */
     /* 기다린 뒤에도 어긋나 있으면 그 자리에서 바로잡는다. 대기 중에 소스가 계속
