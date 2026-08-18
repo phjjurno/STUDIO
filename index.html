@@ -6662,10 +6662,22 @@ async function ensureTape(ctx){
   try{
     if(!tapeRaw) tapeRaw=await (await fetch(TAPE_SRC)).arrayBuffer();
     const buf=await ctx.decodeAudioData(tapeRaw.slice(0));
-    tapeBufs.set(sr,buf); return buf;
+    tapeBufs.set(sr,buf);
+    if(ctx===actx && syncTapeGap()) renderAll();     /* 빈자리를 실제 길이에 맞춤 */
+    return buf;
   }catch(err){ console.error('transition sound',err); tapeBufs.set(sr,null); return null; }
 }
 const tapeBufFor=ctx=>tapeBufs.get(ctx.sampleRate)||null;
+/* 켜져 있는데 빈자리가 효과음 길이와 다르면 맞춘다.
+   예전 버전에서 켜 둔 프로젝트는 빈자리가 짧게 남아 있어 소리가 곡과 겹쳤다.
+   파일을 불러온 뒤·프로젝트를 연 뒤·내보내기 직전에 불러 스스로 교정한다. */
+function syncTapeGap(){
+  if(!state.tape || !state.tape.on) return false;
+  const len=(actx && tapeBufFor(actx) || {}).duration || TAPE_LEN;
+  if(Math.abs((state.tape.lead||0)-len) < .02) return false;
+  applyTapeLead(len);
+  return true;
+}
 function tapeSeams(){
   const cs=plClips(); const out=[];
   const sec=1.2;                          /* 너무 붙은 경계를 걸러내는 최소 간격 */
@@ -7024,6 +7036,13 @@ function drawProgressBar(t){
   let cur=null, progress=0;
   for(const c of clips){
     if(t>=c.start&&t<clipEnd(c)){ cur=c; progress=(t-c.start)/Math.max(.001,c.dur); break; }
+  }
+  /* 전환음이 들어가는 곡 사이 빈자리에서는 곡이 없어 바가 사라졌다.
+     제목이 얹혀 있는 바라 화면이 비어 보이므로, 빈자리에서는 직전 곡을 꽉 찬 상태로
+     그대로 두고(첫 곡 앞은 1번 곡을 0%로) 곡이 바뀌는 순간에만 바뀌게 한다. */
+  if(!cur){
+    for(const c of clips) if(t>=clipEnd(c)) { cur=c; progress=1; }
+    if(!cur){ cur=clips[0]; progress=0; }
   }
   if(!cur) return;
   const {g,w,h}=R, T=R.T||0;
@@ -10252,7 +10271,7 @@ async function makeStash(){
 async function startExport(){
   if(state.rendering) return;
   pause(); stopSnippet(); ensureCtx();
-  if(state.tape&&state.tape.on) await ensureTape(actx);   /* 전환음 파일 준비 */
+  if(state.tape&&state.tape.on){ await ensureTape(actx); if(syncTapeGap()) renderAll(); }
   const dur=tlDuration();
   if(dur<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
   if(!(window.VideoEncoder && window.AudioEncoder && window.Mp4Muxer)){
@@ -10805,6 +10824,8 @@ async function loadProject(name){
     }catch(e){ console.warn('에셋 로드 실패', ar.name, e); }
   }
   state.tracks=rec.tracks; ensureSubTracks();
+  /* 전환음이 켜진 프로젝트는 빈자리를 효과음 실제 길이에 맞춰 둔다 */
+  if(rec.design && rec.design.tape && rec.design.tape.on){ ensureCtx(); ensureTape(actx); }
   for(const tr of state.tracks) for(const c of tr.clips){
     if(c.lyricsRaw!==undefined){ const a=A(c.assetId);
       c.lyrics=parseLyrics(c.lyricsRaw, a? a.duration : c.dur); }
