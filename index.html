@@ -318,6 +318,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       <div class="hint2">곡이 바뀌는 자리마다 <b>카세트를 넣고 재생 버튼을 누르는 소리</b>를 얹습니다. 미리듣기와 내보내기에 함께 들어갑니다.</div>
       <div class="opt-label">유튜브 타임스탬프 (설명란용)</div>
+      <div class="hint2">설명란 <b>맨 위</b>에 그대로 붙여넣으면 챕터가 생깁니다. 유튜브 조건 — 첫 줄 <b>00:00</b> · <b>3개 이상</b> · 각 챕터 <b>10초 이상</b>. 전환음을 켜면 첫 곡 앞 전환음까지 1번 챕터에 포함됩니다.</div>
       <div class="row">
         <button class="chip" id="tsBtn">타임스탬프 만들기</button>
         <button class="chip" id="tsCopy" style="display:none">📋 복사</button>
@@ -10986,22 +10987,45 @@ $('projDelAll').onclick=async()=>{
 $('projSave').addEventListener('click',saveProject);
 
 /* ═══════ 유튜브 타임스탬프 ═══════ */
+/* 유튜브 자동 챕터 규칙
+   ① 첫 줄이 반드시 0:00 ② 3개 이상 ③ 각 챕터 10초 이상 ④ 오름차순.
+   전환음 빈자리가 생기면서 첫 곡이 0초가 아니게 돼 첫 줄이 0:04가 됐고,
+   그 탓에 유튜브가 챕터를 만들지 않았다. 첫 줄은 항상 0:00으로 맞춘다. */
 function buildTimestamps(){
   const cs=plClips();
   if(!cs.length) return '';
   const total=tlDuration(), useH=total>=3600;
-  const f=s=>{ s=Math.floor(s);
+  const f=s=>{ s=Math.max(0,Math.floor(s));
     const hh=Math.floor(s/3600), mm=Math.floor(s%3600/60), ss=s%60;
     return useH? `${hh}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`
-               : `${mm}:${String(ss).padStart(2,'0')}`; };
-  return cs.map(c=>{ const a=A(c.assetId);
-    return `${f(c.start)} ${c.title||(a?a.name:'')}`; }).join('\n');
+               : `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`; };
+  const rows=cs.map((c,i)=>{
+    const a=A(c.assetId);
+    const at=(i===0)? 0 : c.start;              /* 첫 곡은 0:00 (앞의 전환음까지 포함) */
+    return {at, name:(c.title||(a?a.name:'')||`트랙 ${i+1}`)};
+  });
+  /* 첫 줄은 유튜브가 확실히 인식하는 00:00 표기로 고정 (1시간 이상이어도 동일) */
+  const lines=rows.map((r,i)=>`${i===0? '00:00' : f(r.at)} ${r.name}`);
+  /* 유튜브가 거부하는 조건은 미리 알려 준다 */
+  const warn=[];
+  if(rows.length<3) warn.push(`곡이 ${rows.length}개 — 유튜브는 챕터가 3개 이상이어야 인식합니다.`);
+  const short=[];
+  for(let i=0;i<rows.length;i++){
+    const end=(i<rows.length-1)? rows[i+1].at : total;
+    if(end-rows[i].at < 10) short.push(`${i+1}번 「${rows[i].name}」`);
+  }
+  if(short.length) warn.push(`10초보다 짧은 챕터: ${short.join(', ')} — 유튜브가 무시합니다.`);
+  return {text:lines.join('\n'), warn};
 }
 $('tsBtn').addEventListener('click',()=>{
   if(!plClips().length){ setStatus('먼저 음악 파일을 추가해 주세요.'); return; }
   const box=$('tsBox');
-  box.value=buildTimestamps();
+  const r=buildTimestamps();
+  box.value=r.text;
   box.style.display='block'; $('tsCopy').style.display='inline-block';
+  setStatus(r.warn.length
+    ? `타임스탬프를 만들었습니다 — <b style="color:var(--amber)">확인 필요</b>: ${r.warn.join(' / ')}`
+    : '타임스탬프를 만들었습니다 — 그대로 유튜브 설명란 맨 위에 붙여넣으면 챕터가 생깁니다.');
 });
 $('tsCopy').addEventListener('click',async()=>{
   const box=$('tsBox');
