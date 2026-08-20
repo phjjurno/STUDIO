@@ -311,11 +311,14 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" id="tapeTest">▶ 들어보기</button>
       </div>
       <div class="sliders">
-        <div class="slider"><label>타이밍 <span class="slider-rhs"><b id="tapeDurV" style="display:none">0</b><input type="number" class="snum" id="tapeDurN" min="30" max="200" value="100"><small class="usuf">100=제자리</small></span></label>
+        <div class="slider"><label>길이 <span class="slider-rhs"><b id="tapeLenV" style="display:none">4.6초</b><input type="number" class="snum" id="tapeLenN" min="3" max="100" value="46"><small class="usuf">×0.1초</small></span></label>
+          <input type="range" id="tapeLen" min="3" max="100" value="46"></div>
+        <div class="slider"><label>앞뒤 미세조정 <span class="slider-rhs"><b id="tapeDurV" style="display:none">0.00초</b><input type="number" class="snum" id="tapeDurN" min="30" max="200" value="100"><small class="usuf">100=제자리</small></span></label>
           <input type="range" id="tapeDur" min="30" max="200" value="100"></div>
         <div class="slider"><label>소리 크기 <span class="slider-rhs"><b id="tapeVolV" style="display:none">55%</b><input type="number" class="snum" id="tapeVolN" min="0" max="100" value="55"><small class="usuf">%</small></span></label>
           <input type="range" id="tapeVol" min="0" max="100" value="55"></div>
       </div>
+      <div class="hint2" id="tapeLenHint">길이를 줄이면 효과음의 <b>앞부분이 잘리고 뒤쪽만</b> 남습니다 — 곡이 시작되는 순간은 그대로예요. 곡 사이 빈자리도 같은 길이가 됩니다.</div>
       <div class="hint2">곡이 바뀌는 자리마다 <b>카세트를 넣고 재생 버튼을 누르는 소리</b>를 얹습니다. 미리듣기와 내보내기에 함께 들어갑니다.</div>
       <div class="opt-label">유튜브 타임스탬프 (설명란용)</div>
       <div class="hint2">설명란 <b>맨 위</b>에 그대로 붙여넣으면 챕터가 생깁니다. 유튜브 조건 — 첫 줄 <b>00:00</b> · <b>3개 이상</b> · 각 챕터 <b>10초 이상</b>. 전환음을 켜면 첫 곡 앞 전환음까지 1번 챕터에 포함됩니다.</div>
@@ -328,7 +331,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
     <!-- 디자인 탭 -->
     <div class="tabPane" id="tabDesign">
-      <div class="grp open"><div class="grp-h">배경<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">배경 · 모션 · 질감<span class="chev">▾</span></div><div class="grp-b">
       <div class="opt-label">배경 (영상 클립이 없는 곳에 표시)</div>
       <div class="row">
         <button class="grad-chip on" data-g="0" style="background:linear-gradient(135deg,#1B2A4A,#0E1420)"></button>
@@ -361,10 +364,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
             <input type="range" id="bgOy" min="-100" max="100" value="0"></div>
         </div>
       </div>
-      </div></div>
-
-      <div class="grp"><div class="grp-h">모션 · 질감<span class="chev">▾</span></div><div class="grp-b">
-      <div class="opt-label">배경 모션</div>
+      <div class="opt-label" style="margin-top:12px">배경 모션</div>
       <div class="row" id="motionRow">
         <button class="chip" data-mo="none">정지</button>
         <button class="chip on" data-mo="zoom">슬로우 줌</button>
@@ -420,7 +420,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">템플릿<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">템플릿<span class="chev">▾</span></div><div class="grp-b">
       <div class="row" id="tplRow">
         <button class="chip on" data-tp="none">기본</button>
         <button class="chip" data-tp="lp">💿 LP 레코드</button>
@@ -446,7 +446,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="hint2" id="lpHint" style="display:none;margin-top:6px">💿 배경(배경 탭에서 사진 업로드) 위에 도는 레코드가 얹힙니다. 미리보기에서 드래그로 옮기고, 「LP 크기」로 크기를 조절하세요.</div>
       </div></div>
 
-      <div class="grp"><div class="grp-h">제목 폰트 · 색상 · 효과<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">제목 · 트랙번호<span class="chev">▾</span></div><div class="grp-b">
       <div class="opt-label">제목 폰트</div>
       <div class="row" id="fontRow">
         <button class="chip on" data-f="0" style="font-family:'Noto Sans KR';font-weight:900">고딕</button>
@@ -517,6 +517,19 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip on" data-fx="shadow">텍스트 그림자</button>
         <button class="chip on" data-fx="vignette">비네트</button>
         <button class="chip on" data-fx="title">제목 표시</button>
+      </div>
+      <div class="opt-label">곡이 바뀔 때 제목 등장</div>
+      <div class="row" id="titleAnimRow">
+        <button class="chip on" data-tan="rise">올라오기</button>
+        <button class="chip" data-tan="fade">부드럽게</button>
+        <button class="chip" data-tan="drop">내려오기</button>
+        <button class="chip" data-tan="slide">옆에서</button>
+        <button class="chip" data-tan="zoom">커지며</button>
+        <button class="chip" data-tan="pop">튀어나오기</button>
+        <button class="chip" data-tan="blur">흐림에서</button>
+        <button class="chip" data-tan="type">타자기</button>
+        <button class="chip" data-tan="wipe">쓸어내기</button>
+        <button class="chip" data-tan="none">없음</button>
       </div>
       <div class="opt-label">제목 스타일</div>
       <div class="row" id="titleFxRow">
@@ -602,7 +615,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">곡 진행 바<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">진행 바<span class="chev">▾</span></div><div class="grp-b">
       <div class="row">
         <button class="chip on" id="pbShowBtn">진행 바 표시</button>
         <button class="chip on" id="pbTimeBtn">시간 표시</button>
@@ -641,7 +654,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="tip">캔버스에서 진행 바를 드래그해 위치를 조정할 수 있습니다.</div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">로고 · 워터마크<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">로고<span class="chev">▾</span></div><div class="grp-b">
       <div class="row" style="margin-top:8px">
         <button class="chip" id="logoBtn">🏷 로고 이미지 업로드</button>
         <input type="file" id="logoFileInput" accept="image/*">
@@ -666,7 +679,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
     <!-- 자막 탭 -->
     <div class="tabPane" id="tabSubs">
-      <div class="grp open"><div class="grp-h">자동 자막 (Whisper 음성 인식)<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">자동 자막 (음성 인식)<span class="chev">▾</span></div><div class="grp-b">
       <div class="opt-label">언어</div>
       <div class="row" id="subLangRow">
         <button class="chip on" data-lang="">자동 감지</button>
@@ -685,7 +698,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div id="subProg">타임라인의 모든 오디오를 인식해 자막 트랙(S1)에 넣습니다. 모델은 최초 1회만 다운로드되고 브라우저에 캐시됩니다.</div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">리릭 비디오 (SRT → 가운데 큰 가사)<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">리릭 비디오<span class="chev">▾</span></div><div class="grp-b">
       <div class="hint2">SRT·LRC 를 넣고 켜면 화면 <b>가운데에 가사를 크게</b> 띄웁니다.
         앞뒤 줄은 흐리게 곁들여 리릭 비디오처럼 흐릅니다. (아래 「자막 목록」에서 파일을 가져오세요)</div>
       <div class="row" style="margin-top:8px;gap:6px">
@@ -727,7 +740,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">자막 스타일<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">자막 스타일<span class="chev">▾</span></div><div class="grp-b">
       <div class="opt-label">템플릿</div>
       <div class="row" id="subTplRow">
         <button class="chip on" data-tpl="outline">기본 외곽선</button>
@@ -780,7 +793,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">자막 목록 · SRT/VTT/LRC<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">자막 목록 · 파일 가져오기<span class="chev">▾</span></div><div class="grp-b">
       <div class="row" style="margin-top:8px">
         <button class="chip" id="srtImportBtn">📂 SRT·VTT·LRC 가져오기 (여러 개 가능)</button>
         <input type="file" id="srtFileInput" accept=".srt,.vtt,.lrc,.txt" multiple>
@@ -797,7 +810,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <!-- 프로젝트 탭 -->
     <!-- 쇼츠 탭 -->
     <div class="tabPane" id="tabShorts">
-      <div class="grp open"><div class="grp-h">쇼츠 최적화<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">쇼츠 최적화<span class="chev">▾</span></div><div class="grp-b">
       <div class="hint2">세로 9:16으로 바꾸고, 제목·파형·진행바를 쇼츠 UI에 가리지 않는 안전 영역으로 재배치합니다.</div>
       <div class="row" style="margin-top:8px">
         <button class="chip" id="shOptimize" style="border-color:var(--amber);color:var(--amber)">📱 쇼츠용으로 최적화</button>
@@ -805,7 +818,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">리릭 비디오 — 번역 줄<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">리릭 비디오 — 번역 줄<span class="chev">▾</span></div><div class="grp-b">
       <div class="hint2">세로 화면에서는 원문·번역이 붙어 보이기 쉬워요. 여기서 바로 조절합니다.</div>
       <div class="row" style="margin-top:8px;gap:6px">
         <button class="chip" id="shLvOn">🎤 리릭 비디오</button>
@@ -819,7 +832,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">후킹 문구<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">후킹 문구<span class="chev">▾</span></div><div class="grp-b">
       <div class="hint2">누르면 영상 상단에 들어갑니다. <b>{제목}</b> = 곡 제목 · <b>(괄호)</b> = 강조</div>
       <div class="row" style="margin-top:8px;gap:8px;align-items:center">
         <label style="font-size:12px;color:var(--dim);flex:1;min-width:0">폰트
@@ -866,7 +879,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp open"><div class="grp-h">쇼츠 공장 — 자동 추출 · 일괄 내보내기<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">쇼츠 공장 (자동 추출 · 일괄 내보내기)<span class="chev">▾</span></div><div class="grp-b">
       <div class="row" style="gap:12px;align-items:center">
         <label style="font-size:12px;color:var(--dim)">길이
           <input type="number" class="snum" id="shLen" min="5" max="180" step="5" value="30" style="width:56px"><small class="usuf">초</small></label>
@@ -2979,8 +2992,8 @@ const state = {
        lp:{x:.5,y:.5,scale:1,opacity:1,bright:1,con:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
-  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, shift:0, vol:.55, lead:0}, linkAssets:false, missingAssets:null,
-  glow:1, titleFx:'none', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
+  waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, shift:0, vol:.55, lead:0, len:null}, linkAssets:false, missingAssets:null,
+  glow:1, titleFx:'none', titleAnim:'rise', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
   /* 리릭 비디오 — SRT 를 가운데 크게 띄우는 모드 */
@@ -4233,7 +4246,7 @@ $('tapeBtn').onclick=async()=>{
   markUndo();
   state.tape.on=!state.tape.on; syncTapeUI();
   if(state.tape.on){ ensureCtx(); await ensureTape(actx); }     /* 재생 전에 미리 받아 둔다 */
-  const len=(tapeBufFor(actx)||{}).duration || TAPE_LEN;
+  const len=tapeLen();
   applyTapeLead(state.tape.on? len : 0);                        /* 곡 사이 빈자리 확보/해제 */
   renderAll();
   setStatus(state.tape.on
@@ -4244,12 +4257,38 @@ $('tapeTest').onclick=async()=>{
   const buf=await ensureTape(actx);
   if(!buf){ setStatus('전환음 파일을 불러오지 못했습니다.'); return; }
   const src=actx.createBufferSource(); src.buffer=buf;
-  const gn=actx.createGain(); gn.gain.value=clamp(state.tape.vol??.55,0,1);
+  const vol=clamp(state.tape.vol??.55,0,1);
+  const sec=Math.min(tapeLen(), buf.duration), off0=Math.max(0,buf.duration-sec);
+  const gn=actx.createGain();
+  if(off0>.005){                       /* 들어보기도 실제로 쓰는 길이 그대로 */
+    gn.gain.setValueAtTime(.0001, actx.currentTime);
+    gn.gain.linearRampToValueAtTime(vol, actx.currentTime+.025);
+  }else gn.gain.value=vol;
   src.connect(gn); gn.connect(actx.destination);
   src.onended=()=>{ if(snippetSrc===src) snippetSrc=null; };   /* 끝나면 참조 정리 */
-  src.start(); snippetSrc=src; };
+  src.start(0, off0); snippetSrc=src;
+  setStatus(`전환음 ${sec.toFixed(1)}초 — 곡이 시작되기 직전 구간입니다.`); };
 bindSlider('tapeDur','tapeDurV',v=>{ state.tape.shift=(v-100)/100; },'');
 bindSlider('tapeVol','tapeVolV',v=>state.tape.vol=v/100);
+/* 길이를 바꾸면 곡 사이 빈자리도 그만큼 다시 잡는다 */
+bindSlider('tapeLen','tapeLenV',v=>{
+  state.tape.len=v/10;
+  syncTapeLenUI();
+  if(state.tape.on){ applyTapeLead(tapeLen()); renderAll(); }
+},'');
+function syncTapeLenUI(){
+  const v=Math.round(clamp(tapeLen(),.3,10)*10);
+  const r=$('tapeLen'), n=$('tapeLenN'), b=$('tapeLenV');
+  if(r) r.value=v; if(n) n.value=v; if(b) b.textContent=(v/10).toFixed(1)+'초';
+  const d=$('tapeDurV'); if(d) d.textContent=(state.tape.shift||0).toFixed(2)+'초';
+  const hint=$('tapeLenHint');
+  if(hint){
+    const need=tapeQuietTail+.15;
+    hint.innerHTML=(tapeQuietTail>.3 && v/10 < need)
+      ? `⚠ 이 길이는 <b>파일 뒤쪽 무음 구간</b>이라 거의 안 들립니다 — 지금 파일은 마지막 <b>${tapeQuietTail.toFixed(1)}초</b>가 무음이라 <b>${need.toFixed(1)}초</b> 이상으로 잡으세요.`
+      : '길이를 줄이면 효과음의 <b>앞부분이 잘리고 뒤쪽만</b> 남습니다 — 곡이 시작되는 순간은 그대로예요. 곡 사이 빈자리도 같은 길이가 됩니다.';
+  }
+}
 syncTapeUI();
 /* 지정한 시각에서 클립을 자른다 (가위·분할 공통) */
 function cutClipAt(c,tr,t){
@@ -6333,16 +6372,50 @@ function titleAnchor(){
   const y=(tp.custom? tp.y : (circleLike? state.el.wave.y+.012 : (portrait? .27:.33)))*h;
   return {x,y};
 }
+/* 곡이 바뀔 때 제목이 등장하는 방식.
+   k=0 이 시작, k=1 이 제자리. 되돌려 주는 값으로 투명도·위치·크기·흐림을 만든다.
+   type/wipe 는 글자를 잘라 보여 주므로 cut 값을 쓴다. */
+function titleAnimAt(kind, k, w, h){
+  const e=1-Math.pow(1-clamp(k,0,1),3);            /* 감속 */
+  const back=x=>{ const c1=1.9, c3=c1+1; return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2); };
+  const o={a:1, dx:0, dy:0, sc:1, blur:0, cut:1};
+  switch(kind){
+    case 'none':  return o;
+    case 'fade':  o.a=e; return o;
+    case 'rise':  o.a=Math.min(1,k*2.2); o.dy=(1-e)*h*.055; return o;
+    case 'drop':  o.a=Math.min(1,k*2.2); o.dy=-(1-e)*h*.055; return o;
+    case 'slide': o.a=Math.min(1,k*2.2); o.dx=-(1-e)*w*.10; return o;
+    case 'zoom':  o.a=e; o.sc=.72+.28*e; return o;
+    case 'pop':   o.a=Math.min(1,k*3);   o.sc=.55+.45*back(clamp(k,0,1)); return o;
+    case 'blur':  o.a=e; o.blur=(1-e)*w*.012; return o;
+    case 'type':  o.cut=clamp(k*1.15,0,1); return o;
+    case 'wipe':  o.cut=clamp(k*1.15,0,1); o.a=1; return o;
+    default:      o.a=Math.min(1,k*2.2); o.dy=(1-e)*h*.055; return o;
+  }
+}
+/* 「곡이 바뀔 때 제목 등장」 칩을 누르면 그 자리에서 한 번 보여 준다 */
+let titleAnimPreview=0;
 function drawTitle(title, idx, total, progress, tNow){
   const {g,w,h}=R, portrait=h>w;
   const now = tNow!=null? tNow : performance.now();
-  const fadeIn = state.titleShownAt!=null && state.titleShownAt>0? Math.min(1,(now-state.titleShownAt)/900) : 1;
-  const rise=(1-fadeIn)*h*.014;
+  let k = state.titleShownAt!=null && state.titleShownAt>0? Math.min(1,(now-state.titleShownAt)/900) : 1;
+  if(titleAnimPreview){                        /* 미리보기 — 0.9초 동안 재생하고 스스로 끝난다 */
+    const el=performance.now()-titleAnimPreview;
+    if(el<900){ k=el/900; if(!state.playing&&!state.rendering) requestAnimationFrame(drawNow); }
+    else titleAnimPreview=0;
+  }
+  const AN=titleAnimAt(state.titleAnim||'rise', k, w, h);
+  const fadeIn=AN.a;
+  const rise=AN.dy;
   g.save(); g.globalAlpha=fadeIn;
   g.textAlign='center';
 
   const circleLike = state.wave==='circle'||state.wave==='radial';
   const {x:tx, y:ty}=titleAnchor();
+  if(AN.sc!==1 || AN.dx){                      /* 확대·옆으로 — 제목 기준점에서 변형 */
+    g.translate(tx+AN.dx, ty); g.scale(AN.sc,AN.sc); g.translate(-tx,-ty);
+  }
+  if(AN.blur>0){ try{ g.filter=`blur(${AN.blur.toFixed(1)}px)`; }catch(e){} }
 
   const F=state.font;
   let fs=Math.round(w*(portrait?.058:.044)*F.mul*state.titleScale);
@@ -6416,7 +6489,18 @@ function drawTitle(title, idx, total, progress, tNow){
 
   setFont();
   {
-    const TXT=title||' ', TY=ty+rise, TC=state.titleColor;
+    /* 타자기는 글자를 하나씩, 쓸어내기는 가로로 잘라 보여 준다.
+       배경 박스는 위에서 전체 제목 기준으로 이미 잡았으므로 흔들리지 않는다. */
+    let shown=title||' ';
+    if(AN.cut<1 && (state.titleAnim==='type')){
+      const n=Math.max(0, Math.round(shown.length*AN.cut));
+      shown=shown.slice(0,n)||' ';
+    }
+    if(AN.cut<1 && state.titleAnim==='wipe'){
+      const tw=g.measureText(shown).width;
+      g.beginPath(); g.rect(tx-tw/2-w*.01, 0, tw*AN.cut+w*.02, h); g.clip();
+    }
+    const TXT=shown, TY=ty+rise, TC=state.titleColor;
     const fx=state.titleFx||'none';
     const TW=g.measureText(TXT).width;
     /* 질감이 얹히는 면 위 글자색 — 강조 면을 어둡게 잡아도 묻히지 않게 밝기로 고른다 */
@@ -6699,17 +6783,39 @@ async function ensureTape(ctx){
     if(!tapeRaw) tapeRaw=await (await fetch(TAPE_SRC)).arrayBuffer();
     const buf=await ctx.decodeAudioData(tapeRaw.slice(0));
     tapeBufs.set(sr,buf);
-    if(ctx===actx && syncTapeGap()) renderAll();     /* 빈자리를 실제 길이에 맞춤 */
+    if(!tapeQuietTail) measureTapeTail(buf);
+    if(ctx===actx){ syncTapeLenUI(); if(syncTapeGap()) renderAll(); }  /* 빈자리를 실제 길이에 맞춤 */
     return buf;
   }catch(err){ console.error('transition sound',err); tapeBufs.set(sr,null); return null; }
 }
 const tapeBufFor=ctx=>tapeBufs.get(ctx.sampleRate)||null;
+/* 파일 원본 길이 — 아직 못 읽었으면 알려진 값 */
+function tapeSrcLen(){ return ((actx && tapeBufFor(actx)) || {}).duration || TAPE_LEN; }
+/* 파일 끝쪽 무음 길이 — 뒤에서부터 소리가 살아 있는 지점을 찾는다.
+   길이를 줄이면 뒤에서부터 남기는데, 이 파일은 마지막 2초가 거의 무음이라
+   그보다 짧게 잡으면 아무 소리도 안 난다. 그걸 화면에 알려 주려고 잰다. */
+let tapeQuietTail=0;
+function measureTapeTail(buf){
+  const ch=buf.getChannelData(0), SR=buf.sampleRate, W=Math.floor(SR*.05);
+  let last=0;
+  for(let i=0;i+W<=ch.length;i+=W){
+    let pk=0; for(let k=i;k<i+W;k++){ const v=Math.abs(ch[k]); if(v>pk) pk=v; }
+    if(pk>.05) last=i+W;
+  }
+  tapeQuietTail=Math.max(0, buf.duration-last/SR);
+}
+/* 실제로 쓸 길이(초). 원본보다 짧으면 앞을 잘라 뒷부분만 쓰고,
+   길게 잡으면 앞에 그만큼 빈 시간이 붙는다(소리 자체는 늘리지 않는다). */
+function tapeLen(){
+  const n=state.tape && state.tape.len;
+  return clamp(n>0? n : tapeSrcLen(), .3, 10);
+}
 /* 켜져 있는데 빈자리가 효과음 길이와 다르면 맞춘다.
    예전 버전에서 켜 둔 프로젝트는 빈자리가 짧게 남아 있어 소리가 곡과 겹쳤다.
    파일을 불러온 뒤·프로젝트를 연 뒤·내보내기 직전에 불러 스스로 교정한다. */
 function syncTapeGap(){
   if(!state.tape || !state.tape.on) return false;
-  const len=(actx && tapeBufFor(actx) || {}).duration || TAPE_LEN;
+  const len=tapeLen();
   if(Math.abs((state.tape.lead||0)-len) < .02) return false;
   applyTapeLead(len);
   return true;
@@ -6735,21 +6841,30 @@ function scheduleTape(ctx, dest, base, t0, until, rate){
   const RT=rate>0? rate : 1;
   if(!state.tape || !state.tape.on) return made;
   const buf=tapeBufFor(ctx); if(!buf) return made;        /* 아직 안 불러왔으면 건너뜀 */
-  const sec=buf.duration, vol=clamp(state.tape.vol??.55,0,1);
-  const shift=clamp(state.tape.shift||0,-2,2);           /* 타이밍 미세 조정 */
+  const vol=clamp(state.tape.vol??.55,0,1);
+  const shift=clamp(state.tape.shift||0,-2,2);           /* 앞뒤 미세 조정 */
+  /* 길이를 줄이면 앞을 자른다 — 곡이 시작되는 순간의 소리(딸깍·모터)를 살리기 위해서다 */
+  const sec=Math.min(tapeLen(), buf.duration);
+  const off0=Math.max(0, buf.duration-sec);
+  const trimmed=off0>.005;
   for(const seam of tapeSeams()){
-    /* 곡 사이 빈자리에 통째로 넣는다 — 효과음이 끝나는 지점이 곡 시작.
-       예전엔 안착음을 곡 시작에 맞춰 앞뒤가 곡과 겹쳐 들렸다. */
+    /* 효과음이 끝나는 지점이 곡 시작. 예전엔 안착음을 곡 시작에 맞춰 앞뒤가 곡과 겹쳐 들렸다. */
     const at=seam-sec+shift;
     if(at+sec<=base) continue;
     if(until!=null && at>=until) continue;
     const src=ctx.createBufferSource(); src.buffer=buf;
     src.playbackRate.value=RT;
-    const gn=ctx.createGain(); gn.gain.value=vol;
+    const gn=ctx.createGain();
     src.connect(gn); gn.connect(dest);
     const lead=at-base;
-    if(lead>=0) src.start(t0+lead/RT);
-    else src.start(t0, Math.min(sec-.001, -lead));       /* 첫 곡처럼 앞이 잘리면 중간부터 */
+    const when=lead>=0? t0+lead/RT : t0;
+    const into=lead>=0? 0 : Math.min(sec-.001, -lead);   /* 첫 곡처럼 앞이 잘리면 중간부터 */
+    /* 잘라 낸 자리는 파형 한가운데라 그냥 시작하면 '툭' 하고 튄다 — 25ms 만 올려 준다 */
+    if(trimmed && into<=0){
+      gn.gain.setValueAtTime(.0001, when);
+      gn.gain.linearRampToValueAtTime(vol, when+.025/RT);
+    }else gn.gain.value=vol;
+    src.start(when, off0+into);
     made.push(src);
   }
   return made;
@@ -7496,16 +7611,19 @@ function drawPlaylistText(t){
   for(let i=0;i<cs.length;i++) if(t>=cs[i].start-.001) idx=i;
   if(idx<0) idx=0;
   const c=cs[idx], a=A(c.assetId);
+  /* 첫 곡이 시작되기 전(전환음 빈자리)에는 제목을 띄우지 않는다 —
+     음악이 나오는 순간에 등장 애니메이션이 시작되도록. */
+  const beforeFirst = t < cs[0].start-.001;
   const lt=Math.max(0,t-c.start), lMs=lt*1000;
   if(state.template==='lp'){
     drawLP(t, c, idx, cs, a);
     /* LP 위에 별도(고정) 제목 텍스트 — 드래그로 위치 이동 */
-    if(state.lpSideTitle){
+    if(state.lpSideTitle && !beforeFirst){
       state.titleShownAt=lMs<900? .0001 : 0;
       drawTitle(c.title||(a?a.name:''), idx, cs.length, null, lMs<900? lMs+.0001 : null);
       state.titleShownAt=0;
     }
-  }else if(state.showTitle){
+  }else if(state.showTitle && !beforeFirst){
     state.titleShownAt=lMs<900? .0001 : 0;
     drawTitle(c.title||(a?a.name:''), idx, cs.length, null, lMs<900? lMs+.0001 : null);
     state.titleShownAt=0;
@@ -9981,16 +10099,24 @@ function renderBgPicker(){
     row.appendChild(b);
   }
 }
+/* 슬라이더 값 표시 — 함수 선언이라 bindSlider 가 위에서 먼저 불려도 안전하다
+   (const 맵으로 두면 초기화 전 접근으로 스크립트가 통째로 멈춘다) */
+function sliderFmt(id, suffix){
+  if(id==='tapeLen') return v=>(v/10).toFixed(1)+'초';
+  if(id==='tapeDur') return v=>((v-100)/100).toFixed(2)+'초';
+  return v=>v+suffix;
+}
 function bindSlider(id, valId, fn, suffix='%'){
   const r=$(id);
+  const show=sliderFmt(id, suffix);
   r.addEventListener('input',e=>{ const v=+e.target.value;
-    $(valId).textContent=v+suffix;
+    $(valId).textContent=show(v);
     const n=$(id+'N'); if(n) n.value=v;
     fn(v); if(!state.playing&&!state.rendering) drawNow(); });
   const n=$(id+'N');
   if(n) n.addEventListener('change',()=>{
     const v=clamp(+n.value,+r.min,+r.max); n.value=v; r.value=v;
-    $(valId).textContent=v+suffix; fn(v); drawNow();
+    $(valId).textContent=show(v); fn(v); drawNow();
   });
 }
 bindSlider('bgScale','bgScaleV',v=>state.bg.scale=v/100);
@@ -10187,6 +10313,16 @@ $('tlbBgColor').addEventListener('input',e=>{
     drawNow();
   });
 }
+$('titleAnimRow').addEventListener('click',e=>{
+  const b=e.target.closest('.chip'); if(!b) return;
+  [...$('titleAnimRow').children].forEach(c=>c.classList.remove('on'));
+  b.classList.add('on');
+  state.titleAnim=b.dataset.tan;
+  /* 고른 효과를 바로 보여 준다 — 지금 곡의 첫 0.9초를 다시 그린다 */
+  titleAnimPreview=performance.now();
+  drawNow();
+  setStatus('곡이 바뀔 때 제목이 '+b.textContent+' 방식으로 등장합니다.');
+});
 $('titleFxRow').addEventListener('click',e=>{
   const b=e.target.closest('.chip'); if(!b) return;
   [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
@@ -10710,7 +10846,8 @@ function snapshotSettings(){
     waveColor:state.waveColor, titleColor:state.titleColor, waveDyn:state.waveDyn,
     lyric:{...state.lyric},
     tape:{...state.tape},
-    glow:state.glow, titleFx:state.titleFx, shadowOn:state.shadowOn, vignette:state.vignette,
+    glow:state.glow, titleFx:state.titleFx, titleAnim:state.titleAnim,
+    shadowOn:state.shadowOn, vignette:state.vignette,
     titleScale:state.titleScale, showTitle:state.showTitle,
     fontIdx:Math.max(0,FONTS.indexOf(state.font)),
     template:state.template, lpTonearm:state.lpTonearm, lpSideTitle:state.lpSideTitle, trackLabel:{...state.trackLabel},
@@ -10730,9 +10867,10 @@ function applySettings(s){
   state.template=s.template||"none"; state.lpTonearm=!!s.lpTonearm; state.lpSideTitle=!!s.lpSideTitle;
   if(s.trackLabel) Object.assign(state.trackLabel, s.trackLabel);
   state.waveColor=s.waveColor; state.titleColor=s.titleColor;
-  state.glow=s.glow; state.titleFx=s.titleFx||'none'; state.shadowOn=s.shadowOn; state.vignette=s.vignette;
+  state.glow=s.glow; state.titleFx=s.titleFx||'none'; state.titleAnim=s.titleAnim||'rise';
+  state.shadowOn=s.shadowOn; state.vignette=s.vignette;
   if(s.waveDyn!=null) state.waveDyn=s.waveDyn;
-  if(s.tape) Object.assign(state.tape, s.tape);
+  if(s.tape){ Object.assign(state.tape, s.tape); syncTapeUI(); syncTapeLenUI(); }
   if(s.lyric){ Object.assign(state.lyric, s.lyric); syncLyricUI(); }
   state.titleScale=s.titleScale; state.showTitle=s.showTitle!==false;
   state.font=FONTS[s.fontIdx]||FONTS[0];
@@ -10748,6 +10886,7 @@ function syncUIFromState(){
   pick('fontRow',c=>+c.dataset.f===FONTS.indexOf(state.font));
   pick('tplRow',c=>c.dataset.tp===(state.template||'none'));
   pick('titleFxRow',c=>c.dataset.tfx===(state.titleFx||'none'));
+  pick('titleAnimRow',c=>c.dataset.tan===(state.titleAnim||'rise'));
   syncTitleHue();
   $('lpOpts').style.display=state.template==='lp'?'':'none';
   $('lpHint').style.display=state.template==='lp'?'':'none';
@@ -11132,6 +11271,7 @@ $('tsCopy').addEventListener('click',async()=>{
 });
 
 /* ═══════ 초기화 ═══════ */
+syncTapeLenUI();          /* 전환음 상수·버퍼가 다 선언된 뒤에 부른다 (TDZ 회피) */
 refreshProjList();
 renderAll();
 if(document.fonts&&document.fonts.ready) document.fonts.ready.then(drawNow);
