@@ -716,6 +716,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <input type="range" id="lvSide" min="25" max="100" value="55"></div>
         <div class="slider"><label>앞뒤 줄 진하기 <span class="slider-rhs"><b id="lvDimV" style="display:none">30%</b><input type="number" class="snum" id="lvDimN" min="0" max="90" value="30"><small class="usuf">%</small></span></label>
           <input type="range" id="lvDim" min="0" max="90" value="30"></div>
+        <div class="slider"><label>번역 줄 크기 <span class="slider-rhs"><b id="lvTrSizeV" style="display:none">62%</b><input type="number" class="snum" id="lvTrSizeN" min="30" max="120" value="62"><small class="usuf">%</small></span></label>
+          <input type="range" id="lvTrSize" min="30" max="120" value="62"></div>
+        <div class="slider"><label>번역 줄 간격 <span class="slider-rhs"><b id="lvTrGapV" style="display:none">70%</b><input type="number" class="snum" id="lvTrGapN" min="0" max="150" value="70"><small class="usuf">%</small></span></label>
+          <input type="range" id="lvTrGap" min="0" max="150" value="70"></div>
         <div class="slider"><label>가로 위치 <span class="slider-rhs"><b id="lvXV" style="display:none">50%</b><input type="number" class="snum" id="lvXN" min="5" max="95" value="50"><small class="usuf">%</small></span></label>
           <input type="range" id="lvX" min="5" max="95" value="50"></div>
         <div class="slider"><label>세로 위치 <span class="slider-rhs"><b id="lvYV" style="display:none">50%</b><input type="number" class="snum" id="lvYN" min="5" max="95" value="50"><small class="usuf">%</small></span></label>
@@ -801,8 +805,22 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
+      <div class="grp open"><div class="grp-h">리릭 비디오 — 번역 줄<span class="chev">▾</span></div><div class="grp-b">
+      <div class="hint2">세로 화면에서는 원문·번역이 붙어 보이기 쉬워요. 여기서 바로 조절합니다.</div>
+      <div class="row" style="margin-top:8px;gap:6px">
+        <button class="chip" id="shLvOn">🎤 리릭 비디오</button>
+        <button class="chip on" id="shLvTrans">🌐 번역 함께</button>
+      </div>
+      <div class="sliders" style="margin-top:8px">
+        <div class="slider"><label>번역 줄 크기 <span class="slider-rhs"><b id="shLvTrSizeV" style="display:none">62%</b><input type="number" class="snum" id="shLvTrSizeN" min="30" max="120" value="62"><small class="usuf">%</small></span></label>
+          <input type="range" id="shLvTrSize" min="30" max="120" value="62"></div>
+        <div class="slider"><label>번역 줄 간격 <span class="slider-rhs"><b id="shLvTrGapV" style="display:none">70%</b><input type="number" class="snum" id="shLvTrGapN" min="0" max="150" value="70"><small class="usuf">%</small></span></label>
+          <input type="range" id="shLvTrGap" min="0" max="150" value="70"></div>
+      </div>
+      </div></div>
+
       <div class="grp open"><div class="grp-h">후킹 문구<span class="chev">▾</span></div><div class="grp-b">
-      <div class="hint2">문구를 누르면 영상 상단에 후킹 자막이 들어갑니다. <b>{제목}</b>은 곡 제목으로 자동 치환돼요.<br>줄을 직접 나누면 <b>썸네일 배너</b>의 윗줄·아랫줄 색이 그 줄에 그대로 적용되고, <b>(괄호)</b>로 감싼 말은 더 굵고 다른 색으로 강조됩니다.</div>
+      <div class="hint2">누르면 영상 상단에 들어갑니다. <b>{제목}</b> = 곡 제목 · <b>(괄호)</b> = 강조</div>
       <div class="row" style="margin-top:8px;gap:8px;align-items:center">
         <label style="font-size:12px;color:var(--dim);flex:1;min-width:0">폰트
           <select id="shFont" style="width:100%"></select></label>
@@ -837,21 +855,15 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <label class="row" id="shBand2Wrap" style="margin-top:4px;gap:6px;align-items:center;cursor:pointer;font-size:12px;color:var(--dim)">
         <input type="checkbox" id="shBand2" checked> 반대쪽도 검정 띠 <small class="usuf">(위아래로 감싸 가운데 집중)</small></label>
       <div id="shPrev" class="shprev"><span></span></div>
-      <div class="row" id="shHookCat" style="margin-top:10px"></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
         <textarea class="snum" id="shHookCustom" rows="2" placeholder="새 문구 — 쓰는 대로 미리보기에 바로 보입니다&#10;Enter = 줄바꿈 · 강조할 말은 (괄호)로" style="flex:1;min-width:0;text-align:left;padding:7px 10px;resize:vertical;line-height:1.35;font-family:inherit"></textarea>
-        <button class="chip" id="shHookSave" title="이 카테고리에 저장">💾 저장</button>
+        <button class="chip" id="shHookSave" title="목록에 저장">💾 저장</button>
         <button class="chip" id="shHookAdd" title="저장하지 않고 영상에만 넣기">＋ 넣기</button>
       </div>
       <div class="row" style="margin-top:6px">
-        <button class="chip" id="shHookReset" title="이 카테고리를 기본 문구로 되돌립니다">↩ 이 카테고리 기본값</button>
+        <button class="chip" id="shHookReset" title="저장한 문구를 모두 지웁니다">🗑 목록 비우기</button>
       </div>
-      <div class="hint2"><b>Enter</b>로 줄을 나누면 그 자리에서 갈라집니다 (비워 두면 알아서 두 줄로).
-        쓰는 동안 화면 미리보기에 그대로 보이니 줄이 어디서 나뉘는지 보고 고치세요 —
-        <b>⌘/Ctrl+Enter</b> 로 바로 넣기.</div>
-      <div class="hint2">문구를 누르면 재생 헤드 위치에 들어갑니다. <b>✎</b> 수정 · <b>✕</b> 삭제 —
-        고친 내용은 이 브라우저에 저장돼 다음에도 그대로 나옵니다.</div>
       </div></div>
 
       <div class="grp open"><div class="grp-h">쇼츠 공장 — 자동 추출 · 일괄 내보내기<span class="chev">▾</span></div><div class="grp-b">
@@ -2968,7 +2980,8 @@ const state = {
   /* 리릭 비디오 — SRT 를 가운데 크게 띄우는 모드 */
   lyric:{on:false, size:1, sideSize:.55, dim:.30, x:.5, y:.5, fontIdx:0,
     color:'#FFFFFF', color2:'#FFD400', karaoke:false, context:true, anim:true, glow:true,
-    trans:true, mode:'context'},
+    trans:true, mode:'context', trSize:.62, trGap:.70},   /* 번역 줄 크기·원문과 간격 */
+  /* 간격은 원문 글자 크기 기준. 0.62 아래로 내리면 원문과 겹친다(줄높이 1.24의 절반). */
   subStyle:{template:'outline', fontIdx:0, size:1, color:'#FFFFFF', color2:'#FFD400', x:.5, y:.86, anim:true,
     tr:{show:true, fontIdx:0, size:.78, color:'#BFD0E2', gap:.34}},   /* 번역(아랫줄) */
   /* 진행 바 */
@@ -7728,7 +7741,7 @@ function drawLyricVideo(t){
   const showSide=(mode==='context');
   const fsMain=Math.round(w*(portrait?.062:.040)*LV.size*F.mul);
   const fsSide=Math.round(fsMain*LV.sideSize);
-  const fsTr=Math.round(fsMain*.62);                 /* 번역 글자 크기 */
+  const fsTr=Math.round(fsMain*(LV.trSize!=null?LV.trSize:.62));   /* 번역 글자 크기 */
   const cx=LV.x*w, cy=LV.y*h;
   const active=(t>=cs[idx].start && t<clipEnd(cs[idx]));
   const lt=active? t-cs[idx].start : 0;
@@ -7755,7 +7768,7 @@ function drawLyricVideo(t){
   const trTxt=transOf(cs[idx]);
   const trRows=trTxt? wrap(trTxt, trFont) : [];
   const mainBlockH=mainRows.length*lineH(fsMain);
-  const trGap=trRows.length? fsMain*.30 : 0;
+  const trGap=trRows.length? fsMain*(LV.trGap!=null?LV.trGap:.70) : 0;
   const trBlockH=trRows.length*lineH(fsTr);
   const blockH=mainBlockH+trGap+trBlockH;
 
@@ -8949,6 +8962,18 @@ function syncLyricUI(){
   const sSet=(id,vid,v)=>{ const r=$(id),n=$(id+'N'),b2=$(vid);
     if(r) r.value=v; if(n) n.value=v; if(b2) b2.textContent=v+'%'; };
   sSet('lvX','lvXV',Math.round(LV.x*100)); sSet('lvY','lvYV',Math.round(LV.y*100));
+  set('shLvOn',LV.on); set('shLvTrans',LV.trans!==false);
+  mirrorLvTr();
+}
+/* 자막 탭과 쇼츠 탭에 같은 슬라이더가 하나씩 있다 — 값이 어긋나지 않게 맞춰 준다 */
+function mirrorLvTr(){
+  const LV=state.lyric;
+  const put=(id,v)=>{ const r=$(id), n=$(id+'N'), b=$(id+'V');
+    if(r) r.value=v; if(n) n.value=v; if(b) b.textContent=v+'%'; };
+  const sz=Math.round((LV.trSize!=null?LV.trSize:.62)*100);
+  const gp=Math.round((LV.trGap!=null?LV.trGap:.70)*100);
+  put('lvTrSize',sz); put('shLvTrSize',sz);
+  put('lvTrGap',gp);  put('shLvTrGap',gp);
 }
 const lvToggle=(id,key)=>{ const b=$(id); if(!b) return;
   b.onclick=()=>{ state.lyric[key]=!state.lyric[key]; syncLyricUI(); drawNow(); }; };
@@ -8968,6 +8993,13 @@ $('lvColor2').addEventListener('input',e=>{ state.lyric.color2=e.target.value; d
 bindSlider('lvSize','lvSizeV',v=>state.lyric.size=v/100);
 bindSlider('lvSide','lvSideV',v=>state.lyric.sideSize=v/100);
 bindSlider('lvDim','lvDimV',v=>state.lyric.dim=v/100);
+bindSlider('lvTrSize','lvTrSizeV',v=>{ state.lyric.trSize=v/100; mirrorLvTr(); });
+bindSlider('lvTrGap','lvTrGapV',v=>{ state.lyric.trGap=v/100; mirrorLvTr(); });
+/* 쇼츠 탭에도 같은 조절기를 두고 양쪽을 붙여 둔다 — 어느 쪽을 만져도 같이 움직인다 */
+bindSlider('shLvTrSize','shLvTrSizeV',v=>{ state.lyric.trSize=v/100; mirrorLvTr(); });
+bindSlider('shLvTrGap','shLvTrGapV',v=>{ state.lyric.trGap=v/100; mirrorLvTr(); });
+$('shLvOn').onclick=()=>$('lvOn').onclick();
+$('shLvTrans').onclick=()=>{ state.lyric.trans=!state.lyric.trans; syncLyricUI(); drawNow(); };
 bindSlider('lvX','lvXV',v=>state.lyric.x=v/100);
 bindSlider('lvY','lvYV',v=>state.lyric.y=v/100);
 syncLyricUI();
@@ -9214,52 +9246,24 @@ function renderTLLight(c){
 }
 
 /* ═══════════ 쇼츠 공장 ═══════════ */
-const HOOKS_DEFAULT={
-  '첫 소절':['볼륨 올려. 3초 뒤에 알게 됨','이어폰 없으면 반은 못 들은 거임',
-    '이 베이스 나오는 순간 목 움직임','여기서 스크롤 멈춘 사람 귀 좋음','소리 켜라. 진심으로',
-    '5초만. 딱 5초만 참고 들어봐','이거 첫 소절이 전부다','저음 안 나오는 폰이면 나중에 다시 들어',
-    '이 인트로에 안 걸리는 사람 없음','지금 스크롤하면 후회함'],
-  '그루브':['몸이 먼저 알아듣는 소리','이 드럼 늘어지는 거 미쳤다','목이 알아서 까딱거림',
-    '이 구간부터 몸이 꿀렁임','앉아서 못 듣는 노래','어깨부터 반응함','베이스가 바닥을 긁고 지나감',
-    '이 스윙 못 참는 사람 여기 모여','걸어다니면서 들으면 걸음 느려짐','운전할 때 창문 내리게 되는 소리'],
-  '장면':['노을 지는 해변 도로가 그냥 보임','새벽 4시 도시 소리','여름밤 옥상에서 들으면 끝',
-    '야자수랑 네온 자동 재생됨','이 곡 틀면 방이 클럽 됨','창문 열고 들어야 하는 노래',
-    '담배 연기 자욱한 재즈바 같은 소리','낮은 조명에서만 들려야 할 곡','이거 듣고 LA 안 가고 싶으면 인정',
-    '해 지는 시간에 맞춰서 들어봐'],
-  '중독성':['한 문장이 계속 반복되는데 못 빠져나옴','두 번째 후렴부터 너도 부르고 있음',
-    '오늘 하루 이 멜로디 못 지움','가사 몰라도 따라 부르게 됨','이 부분에서 다 같이 소리 지름',
-    '끝까지 듣지 마. 계속 생각남','지금 안 들으면 나중에 알고리즘이 다시 데려옴',
-    '이 훅 한 번 들으면 각인됨','무한 반복 중인 구간','저장 안 하면 다시 못 찾는다'],
-  '감정':['조급한 사람이 들어야 할 노래','남들 속도에 지친 날 듣는 곡','요즘 뒤처진 것 같으면 이거 들어',
-    '새벽에 이 곡 만난 사람만 아는 기분','아무한테도 증명 안 해도 되는 밤',
-    '천천히 가도 된다는 말을 곡으로 만들면','이 가사 한 줄 때문에 계속 듣는 중'],
-  '도발':['이 소리 어디서 나오는지 아는 사람?','기타 한 번도 안 나오는 곡입니다',
-    '이 곡 장르 맞히면 진짜 음악 좀 아는 사람'],
-  '배너 두줄':['비트 씹어 먹는 감다살 느좋 힙합','나만 듣기 아까운 귀호강 감성 힙합',
-    '감다살 감성힙합 찾아? 이거 무조건임!','제목 바로 궁금한 트렌디 감성 힙합',
-    '더위 싹 가시는 여름 힙합 플리','비트 장인이 말아주는 트렌디 느좋 힙합',
-    '도입부터 비트 뭐야? 얼마나 좋은지 감도 안 옴','듣자마자 소름 짝 도는 비트 맛집 이 힙합',
-    '하루종일 생각나는 트렌디 느좋 힙합','청춘 감성 200% 시원한 바이브 여름 힙합',
-    '새벽에만 들리는 저음 깔린 감성 힙합','창문 열고 들어야 하는 노을 드라이브 곡',
-    '첫 소절에 걸리는 느좋 감성 힙합','반복 재생 각인되는 중독성 미친 훅',
-    '한 번 들으면 못 빠져나오는 루프','헤드폰 쓰면 완전히 달라지는 곡',
-    '앉아서 못 듣는 그루브 미친 비트','목이 알아서 까딱거리는 느좋 힙합',
-    '여름밤 옥상에서 틀면 끝나는 플리','네온 켜지는 시간에 맞는 시티팝 무드',
-    '저장 안 하면 다시 못 찾는 숨은 명곡','아는 사람만 아는 감성 힙합 플리',
-    '이어폰 필수 저음 살아있는 트랙','스크롤 멈춘 사람 귀 좋은 거임',
-    '드럼 늘어지는 게 미친 느좋 비트','재즈바 조명 같은 야밤 감성 힙합',
-    '운전할 때 창문 내리게 되는 소리','걸음 느려지는 산책 전용 플리',
-    '두 번째 후렴부터 같이 부르게 됨','15만뷰 그 노래?! 느좋 감성 힙합'],
-  '내 문구':[]
-};
-/* 사용자가 고치거나 추가한 문구는 브라우저에 저장됩니다 */
-const HOOK_KEY='pulseorign.hooks.v1';
-let HOOKS=(()=>{ try{ const v=JSON.parse(localStorage.getItem(HOOK_KEY)||'null');
-    if(v&&typeof v==='object'){ const o={}; for(const k of Object.keys(HOOKS_DEFAULT))
-        o[k]=Array.isArray(v[k])?v[k].slice():HOOKS_DEFAULT[k].slice();
-      for(const k of Object.keys(v)) if(!(k in o)&&Array.isArray(v[k])) o[k]=v[k].slice();
-      return o; } }catch(e){}
-  return JSON.parse(JSON.stringify(HOOKS_DEFAULT)); })();
+/* 예시 문구는 두지 않는다 — 목록은 직접 쓴 문구로만 채워진다.
+   예전 버전이 넣어 둔 기본 문구는 아래 목록으로 걸러 낸다(내 문구만 남긴다). */
+const HOOK_BUILTIN=new Set(["15만뷰 그 노래?! 느좋 감성 힙합", "5초만. 딱 5초만 참고 들어봐", "가사 몰라도 따라 부르게 됨", "감다살 감성힙합 찾아? 이거 무조건임!", "걸어다니면서 들으면 걸음 느려짐", "걸음 느려지는 산책 전용 플리", "기타 한 번도 안 나오는 곡입니다", "끝까지 듣지 마. 계속 생각남", "나만 듣기 아까운 귀호강 감성 힙합", "남들 속도에 지친 날 듣는 곡", "낮은 조명에서만 들려야 할 곡", "네온 켜지는 시간에 맞는 시티팝 무드", "노을 지는 해변 도로가 그냥 보임", "담배 연기 자욱한 재즈바 같은 소리", "더위 싹 가시는 여름 힙합 플리", "도입부터 비트 뭐야? 얼마나 좋은지 감도 안 옴", "두 번째 후렴부터 같이 부르게 됨", "두 번째 후렴부터 너도 부르고 있음", "드럼 늘어지는 게 미친 느좋 비트", "듣자마자 소름 짝 도는 비트 맛집 이 힙합", "목이 알아서 까딱거리는 느좋 힙합", "목이 알아서 까딱거림", "몸이 먼저 알아듣는 소리", "무한 반복 중인 구간", "반복 재생 각인되는 중독성 미친 훅", "베이스가 바닥을 긁고 지나감", "볼륨 올려. 3초 뒤에 알게 됨", "비트 씹어 먹는 감다살 느좋 힙합", "비트 장인이 말아주는 트렌디 느좋 힙합", "새벽 4시 도시 소리", "새벽에 이 곡 만난 사람만 아는 기분", "새벽에만 들리는 저음 깔린 감성 힙합", "소리 켜라. 진심으로", "스크롤 멈춘 사람 귀 좋은 거임", "아는 사람만 아는 감성 힙합 플리", "아무한테도 증명 안 해도 되는 밤", "앉아서 못 듣는 그루브 미친 비트", "앉아서 못 듣는 노래", "야자수랑 네온 자동 재생됨", "어깨부터 반응함", "여기서 스크롤 멈춘 사람 귀 좋음", "여름밤 옥상에서 들으면 끝", "여름밤 옥상에서 틀면 끝나는 플리", "오늘 하루 이 멜로디 못 지움", "요즘 뒤처진 것 같으면 이거 들어", "운전할 때 창문 내리게 되는 소리", "이 가사 한 줄 때문에 계속 듣는 중", "이 곡 장르 맞히면 진짜 음악 좀 아는 사람", "이 곡 틀면 방이 클럽 됨", "이 구간부터 몸이 꿀렁임", "이 드럼 늘어지는 거 미쳤다", "이 베이스 나오는 순간 목 움직임", "이 부분에서 다 같이 소리 지름", "이 소리 어디서 나오는지 아는 사람?", "이 스윙 못 참는 사람 여기 모여", "이 인트로에 안 걸리는 사람 없음", "이 훅 한 번 들으면 각인됨", "이거 듣고 LA 안 가고 싶으면 인정", "이거 첫 소절이 전부다", "이어폰 없으면 반은 못 들은 거임", "이어폰 필수 저음 살아있는 트랙", "재즈바 조명 같은 야밤 감성 힙합", "저음 안 나오는 폰이면 나중에 다시 들어", "저장 안 하면 다시 못 찾는 숨은 명곡", "저장 안 하면 다시 못 찾는다", "제목 바로 궁금한 트렌디 감성 힙합", "조급한 사람이 들어야 할 노래", "지금 스크롤하면 후회함", "지금 안 들으면 나중에 알고리즘이 다시 데려옴", "창문 열고 들어야 하는 노래", "창문 열고 들어야 하는 노을 드라이브 곡", "천천히 가도 된다는 말을 곡으로 만들면", "첫 소절에 걸리는 느좋 감성 힙합", "청춘 감성 200% 시원한 바이브 여름 힙합", "하루종일 생각나는 트렌디 느좋 힙합", "한 문장이 계속 반복되는데 못 빠져나옴", "한 번 들으면 못 빠져나오는 루프", "해 지는 시간에 맞춰서 들어봐", "헤드폰 쓰면 완전히 달라지는 곡"]);
+/* 직접 쓴 문구만 브라우저에 저장됩니다 */
+const HOOK_KEY='pulseorign.hooks.v2';
+let HOOKS=(()=>{
+  try{ const v=JSON.parse(localStorage.getItem(HOOK_KEY)||'null');
+    if(Array.isArray(v)) return v.slice(); }catch(e){}
+  /* 예전 저장본(카테고리별) — 기본 예시는 버리고 직접 쓴 문구만 옮겨 온다 */
+  try{ const old=JSON.parse(localStorage.getItem('pulseorign.hooks.v1')||'null');
+    if(old&&typeof old==='object'){
+      const out=[], seen=new Set();
+      for(const k of Object.keys(old)){ if(!Array.isArray(old[k])) continue;
+        for(const t of old[k]){ if(typeof t!=='string') continue;
+          if(HOOK_BUILTIN.has(t)||seen.has(t)) continue; seen.add(t); out.push(t); } }
+      return out; } }catch(e){}
+  return [];
+})();
 function saveHooks(){ try{ localStorage.setItem(HOOK_KEY, JSON.stringify(HOOKS)); }catch(e){} }
 /* 스타일을 바꾸면 이미 타임라인에 들어간 후킹 문구에도 그대로 반영 */
 function applyHookStyle(){
@@ -9271,8 +9275,7 @@ function applyHookStyle(){
   if(n){ renderTL(); drawNow(); }
   return n;
 }
-function hookPool(){ const p=HOOKS[hookCat]; return (p&&p.length)? p : (HOOKS['배너 두줄']||HOOKS['첫 소절']||['']); }
-let hookCat='배너 두줄';
+function hookPool(){ return HOOKS.length? HOOKS : ['']; }
 const HK_STYLES=[['banner','썸네일 배너'],['pop','팝아웃'],['neon','네온'],['box','박스'],
                  ['grad','그라디언트'],['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
@@ -9333,20 +9336,12 @@ function renderHookStyle(){
   else pv.style.color=C;
 }
 function renderHooks(){
-  const cr=$('shHookCat'), lr=$('shHookList'); if(!cr) return;
-  cr.innerHTML='';
-  for(const k of Object.keys(HOOKS)){
-    const b=document.createElement('button');
-    b.className='chip'+(k===hookCat?' on':'');
-    b.textContent=k+(HOOKS[k].length?` ${HOOKS[k].length}`:'');
-    b.onclick=()=>{ hookCat=k; ghostText=''; renderHooks(); if(ghostOn()) syncHookGhost(true); };
-    cr.appendChild(b);
-  }
+  const lr=$('shHookList'); if(!lr) return;
   lr.innerHTML='';
-  const list=HOOKS[hookCat]||[];
+  const list=HOOKS;
   if(!list.length){
     const e=document.createElement('div'); e.className='hint2';
-    e.textContent='이 카테고리는 비어 있습니다 — 아래 칸에 직접 써넣어 보세요.';
+    e.textContent='아래 칸에 문구를 써서 저장하면 여기에 쌓입니다.';
     lr.appendChild(e);
   }
   list.forEach((t,i)=>{
@@ -9367,7 +9362,7 @@ function renderHooks(){
       let closed=false;
       const fin=(ok)=>{ if(closed) return; closed=true;
         const v=inp.value.replace(/\s+$/,'');
-        if(ok&&v.trim()) HOOKS[hookCat][i]=v; else if(ok&&!v.trim()) HOOKS[hookCat].splice(i,1);
+        if(ok&&v.trim()) HOOKS[i]=v; else if(ok&&!v.trim()) HOOKS.splice(i,1);
         saveHooks(); renderHooks(); };
       previewHook(t);
       inp.addEventListener('input',()=>previewHook(inp.value.replace(/\s+$/,'')));
@@ -9377,7 +9372,7 @@ function renderHooks(){
         if(e.key==='Escape'){ e.preventDefault(); fin(false); } });
       inp.addEventListener('blur',()=>fin(true));
     };
-    rm.onclick=()=>{ HOOKS[hookCat].splice(i,1); saveHooks(); renderHooks(); };
+    rm.onclick=()=>{ HOOKS.splice(i,1); saveHooks(); renderHooks(); };
     row.append(use,ed,rm); lr.appendChild(row);
   });
 }
@@ -9385,7 +9380,7 @@ function renderHooks(){
 let ghostText='';
 function syncHookGhost(on){
   if(!on){ if(hookGhost){ hookGhost=null; drawNow(); } return; }
-  const txt=ghostText || (hookPool()[0]||'볼륨 올려. 3초 뒤에 알게 됨');
+  const txt=ghostText || (hookPool()[0]||'여기에 문구가 이렇게 보입니다');
   hookGhost=Object.assign({otext:txt, tx:{x:.5, y:.16, opacity:1}, fadeIn:0, fadeOut:0}, hookExtra());
   drawNow();
 }
@@ -9393,8 +9388,8 @@ function ghostOn(){ return document.querySelector('#sideTabs button[data-tab="ta
 function previewHook(txt){ ghostText=txt||''; if(ghostOn()) syncHookGhost(true); }
 function addHookPhrase(v){
   v=(v||'').trim(); if(!v) return false;
-  (HOOKS[hookCat]=HOOKS[hookCat]||[]).push(v); saveHooks(); renderHooks();
-  setStatus(`「${hookCat}」에 문구를 저장했습니다.`);
+  HOOKS.push(v); saveHooks(); renderHooks();
+  setStatus('문구를 저장했습니다.');
   return true;
 }
 /* 후킹 문구를 상단 텍스트 오버레이로 추가 */
@@ -9443,10 +9438,9 @@ $('shHold').addEventListener('change',e=>{
   setStatus(hookSty.hold? '후킹 문구를 영상 끝까지 띄웁니다.' : '후킹 문구를 3초만 띄웁니다.'); });
 $('shHookSave').onclick=()=>{ const el=$('shHookCustom'); if(addHookPhrase(el.value)){ el.value=''; previewHook(''); } };
 $('shHookReset').onclick=()=>{
-  if(!HOOKS_DEFAULT[hookCat]){ setStatus('직접 만든 카테고리라 기본값이 없습니다.'); return; }
-  if(!confirm(`「${hookCat}」의 문구를 기본값으로 되돌릴까요? 이 카테고리에 직접 넣은 문구는 사라집니다.`)) return;
-  HOOKS[hookCat]=HOOKS_DEFAULT[hookCat].slice(); saveHooks(); renderHooks();
-  setStatus(`「${hookCat}」를 기본 문구로 되돌렸습니다.`); };
+  if(!HOOKS.length){ setStatus('목록이 이미 비어 있습니다.'); return; }
+  if(!confirm(`저장한 문구 ${HOOKS.length}개를 모두 지울까요?`)) return;
+  HOOKS.length=0; saveHooks(); renderHooks(); setStatus('문구 목록을 비웠습니다.'); };
 $('shHookAdd').onclick=()=>{ const v=$('shHookCustom').value.replace(/\s+$/,''); if(v.trim()){ previewHook(v); addHookOverlay(v); } };
 /* 치는 대로 작업 화면 미리보기에 반영 — 줄이 어디서 나뉘는지 보면서 고칠 수 있다.
    Enter 는 줄바꿈으로 두고, 넣기는 버튼이나 ⌘/Ctrl+Enter 로 한다. */
