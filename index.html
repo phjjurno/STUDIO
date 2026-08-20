@@ -933,6 +933,12 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <button class="tbig" id="playBtn" title="재생/일시정지">▶</button>
       <button class="tbig" id="stopBtn" title="정지" style="display:none">■</button>
       <span id="timeDisp">0:00.0 / 0:00.0</span>
+      <div class="row" id="rateRow" style="margin-left:10px" title="미리보기 배속 — 내보내는 영상 속도는 그대로입니다">
+        <button class="chip on" data-rate="1">1x</button>
+        <button class="chip" data-rate="1.5">1.5x</button>
+        <button class="chip" data-rate="2">2x</button>
+        <button class="chip" data-rate="3">3x</button>
+      </div>
       <div class="row" id="ratioRow" style="margin-left:auto">
         <button class="chip on" data-w="1920" data-h="1080">16:9</button>
         <button class="chip" data-w="1080" data-h="1920">9:16</button>
@@ -2993,6 +2999,7 @@ const state = {
   sel:null, selSet:[],
   time:0, playing:false, rendering:false, cancelRender:false,
   pxs:40, snap:true,
+  previewRate:1,                 /* 미리보기 배속 — 내보내기에는 영향이 없다 */
 };
 const GRADS = [
   ['#1B2A4A','#0E1420'], ['#3A2E4F','#12101E'], ['#0F3B3A','#081414'],
@@ -3252,6 +3259,15 @@ function filterCss(name, amt){
   const k=clamp(amt==null?1:amt,0,1);
   return k<=0? '' : f(k);
 }
+/* 클립별 손 보정 — 프리셋 색 필터 뒤에 이어 붙는다 (밝기·대비·채도) */
+function gradeCss(c){
+  const b=c.bri==null?1:c.bri, k=c.con==null?1:c.con, sa=c.sat==null?1:c.sat;
+  let o='';
+  if(Math.abs(b-1)>.001) o+=`brightness(${b.toFixed(3)}) `;
+  if(Math.abs(k-1)>.001) o+=`contrast(${k.toFixed(3)}) `;
+  if(Math.abs(sa-1)>.001) o+=`saturate(${sa.toFixed(3)}) `;
+  return o.trim();
+}
 const TRANS_NAMES={none:'컷(없음)',dissolve:'크로스 디졸브',slide:'슬라이드',zoom:'줌',blur:'블러'};
 
 function defaultTracks(){ return [
@@ -3292,6 +3308,7 @@ function tlDuration(){ let d=0; for(const tr of state.tracks) for(const c of tr.
 function newClip(assetId, start, dur, extra){
   return Object.assign({ id:uid(), assetId:assetId||null, start, dur, in:0,
     speed:1, vol:1, fadeIn:0, fadeOut:0, filterAmt:1,
+    bri:1, con:1, sat:1, tint:'#FFFFFF', tintAmt:0, tintMode:'multiply',
     tx:{x:.5,y:.5,scale:1,rot:0,opacity:1}, filter:'none', trans:{type:'none',dur:.5} }, extra||{});
 }
 /* 미디어 클립의 소스 시각 */
@@ -6632,26 +6649,31 @@ function audioClipsAll(){
   return out;
 }
 /* 클립 하나를 오디오 그래프에 스케줄 (실시간·오프라인 공용) */
-function scheduleClip(ctx, dest, c, base, t0){
+/* rate 는 미리보기 배속. 타임라인 1초가 실제 1/rate 초에 흐르므로 컨텍스트 시각을
+   그만큼 당기고 소스도 같은 배율로 빨리 읽는다. 소비하는 버퍼 초는 변하지 않는다.
+   내보내기(mixAudio)는 rate 를 넘기지 않아 항상 1배속이다. */
+function scheduleClip(ctx, dest, c, base, t0, rate){
   const a=A(c.assetId); if(!a||!a.audioBuffer) return null;
+  const R=rate>0? rate : 1;
   const end=clipEnd(c);
   if(end<=base+.01) return null;
   const lead=Math.max(0,c.start-base);       /* 시작까지 남은 타임라인 초 */
   const into=Math.max(0,base-c.start);       /* 이미 지난 클립 내부 초 */
+  const at=x=>t0+x/R;                        /* 타임라인 경과 → 컨텍스트 시각 */
   const src=ctx.createBufferSource(); src.buffer=a.audioBuffer;
-  src.playbackRate.value=c.speed;
+  src.playbackRate.value=c.speed*R;
   const gn=ctx.createGain();
-  const v=c.vol, cs=t0+lead, ce=t0+(end-base);
+  const v=c.vol, cs=at(lead), ce=at(end-base);
   const fi=c.fadeIn||0, fo=c.fadeOut||0;
   const v0=(fi>0&&into<fi)? (into/fi)*v : v;
   gn.gain.setValueAtTime(Math.max(.0001,v0), cs);
-  if(fi>into) gn.gain.linearRampToValueAtTime(v, t0+(c.start+fi-base));
-  if(fo>0&&ce-fo>cs){
-    gn.gain.setValueAtTime(v, ce-fo);
+  if(fi>into) gn.gain.linearRampToValueAtTime(v, at(c.start+fi-base));
+  if(fo>0&&ce-fo/R>cs){
+    gn.gain.setValueAtTime(v, at(end-base-fo));
     gn.gain.linearRampToValueAtTime(.0001, ce);
   }
   src.connect(gn); gn.connect(dest);
-  src.start(t0+lead, c.in+into*c.speed, (c.dur-into)*c.speed);
+  src.start(cs, c.in+into*c.speed, (c.dur-into)*c.speed);
   return src;
 }
 /* ───────── 곡 넘어갈 때 카세트 소리 ─────────
@@ -6708,8 +6730,9 @@ function tapeSeams(){
   }
   return out;
 }
-function scheduleTape(ctx, dest, base, t0, until){
+function scheduleTape(ctx, dest, base, t0, until, rate){
   const made=[];
+  const RT=rate>0? rate : 1;
   if(!state.tape || !state.tape.on) return made;
   const buf=tapeBufFor(ctx); if(!buf) return made;        /* 아직 안 불러왔으면 건너뜀 */
   const sec=buf.duration, vol=clamp(state.tape.vol??.55,0,1);
@@ -6721,10 +6744,11 @@ function scheduleTape(ctx, dest, base, t0, until){
     if(at+sec<=base) continue;
     if(until!=null && at>=until) continue;
     const src=ctx.createBufferSource(); src.buffer=buf;
+    src.playbackRate.value=RT;
     const gn=ctx.createGain(); gn.gain.value=vol;
     src.connect(gn); gn.connect(dest);
     const lead=at-base;
-    if(lead>=0) src.start(t0+lead);
+    if(lead>=0) src.start(t0+lead/RT);
     else src.start(t0, Math.min(sec-.001, -lead));       /* 첫 곡처럼 앞이 잘리면 중간부터 */
     made.push(src);
   }
@@ -6777,7 +6801,7 @@ function syncVideos(t, playing){
     const v=a.videoEl;
     const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
     if(playing){
-      v.playbackRate=clamp(c.speed,.25,4);
+      v.playbackRate=clamp(c.speed*(playing===true? playRate() : 1),.25,16);
       if(v.paused){
         /* play() 를 먼저 부른다. currentTime 을 바로 앞에 대입하면 그 탐색이 play 를
            끊어(AbortError) 소리만 나고 영상이 멈추는 일이 있었다. AbortError 는 복제
@@ -6921,19 +6945,22 @@ function play(){
   state.playing=true;
   playBase=state.time; playT0=actx.currentTime+.06;
   playSources=[];
+  const prate=playRate();
   for(const c of audioClipsAll()){
-    const s=scheduleClip(actx, mixBus, c, playBase, playT0);
+    const s=scheduleClip(actx, mixBus, c, playBase, playT0, prate);
     if(s) playSources.push(s);
   }
   /* 전환음 소스도 playSources에 담아야 pause()에서 멈춘다.
      예전엔 담지 않아 정지·미리듣기 뒤에도 예약된 소리가 계속 튀어나왔다. */
-  for(const s2 of scheduleTape(actx, mixBus, playBase, playT0, null)) playSources.push(s2);
+  for(const s2 of scheduleTape(actx, mixBus, playBase, playT0, null, prate)) playSources.push(s2);
   $('playBtn').textContent='⏸'; $('stopBtn').style.display='';
   rafLoop();
 }
+/* 실시간 녹화 중에는 배속을 쓰지 않는다 — 녹화물이 빨라져 버린다 */
+function playRate(){ return rtRecorder? 1 : clamp(state.previewRate||1, .25, 4); }
 function rafLoop(){
   if(!state.playing) return;
-  const t=playBase+Math.max(0,actx.currentTime-playT0);
+  const t=playBase+Math.max(0,actx.currentTime-playT0)*playRate();
   state.time=t;
   const dur=tlDuration();
   if(t>=dur){
@@ -6968,6 +6995,19 @@ function seekTo(t){
 $('playBtn').onclick=togglePlay;
 $('stopBtn').onclick=()=>{ if(state.rendering){ state.cancelRender=true; return; } stopPlay(); };
 $('toStartBtn').onclick=()=>seekTo(0);
+/* 미리보기 배속 — 재생 중에 바꾸면 소리를 그 자리에서 다시 예약해야 맞는다 */
+function setPreviewRate(r){
+  state.previewRate=r;
+  [...$('rateRow').children].forEach(x=>x.classList.toggle('on', +x.dataset.rate===r));
+  if(state.playing){ const t=state.time; pause(); state.time=t; play(); }
+}
+$('rateRow').addEventListener('click',e=>{
+  const b=e.target.closest('.chip'); if(!b) return;
+  const r=+b.dataset.rate;
+  if(rtRecorder){ setStatus('실시간 녹화 중에는 배속을 바꿀 수 없습니다.'); return; }
+  setPreviewRate(r);
+  setStatus(r===1? '미리보기 1배속' : `미리보기 ${r}배속 — 내보내는 영상 속도는 그대로입니다.`);
+});
 
 /* 일시정지 상태 그리기 — 비디오 시킹 후 렌더 */
 let seekTok=0;
@@ -7269,7 +7309,7 @@ function drawMediaClip(c,t,fx,p){
   if(alpha<=0) return;
   g.save();
   g.globalAlpha=clamp(alpha,0,1);
-  const flt=filterCss(c.filter, c.filterAmt);
+  const flt=[filterCss(c.filter, c.filterAmt), gradeCss(c)].filter(Boolean).join(' ');
   const bl=blurFx? `blur(${(blurFx*(R.w/1920)).toFixed(1)}px)` : '';
   if(flt||bl){ try{ g.filter=(bl+' '+flt).trim(); }catch(e){} }
   const fit=Math.min(w/iw,h/ih)*c.tx.scale*sFx;
@@ -7278,6 +7318,17 @@ function drawMediaClip(c,t,fx,p){
   g.translate(cx,cy);
   if(c.tx.rot) g.rotate(c.tx.rot*Math.PI/180);
   try{ g.drawImage(src,-dw/2,-dh/2,dw,dh); }catch(e){}
+  /* 색 입히기 — 방금 그린 그림 자리에만 곱하기로 얹는다.
+     투명한 부분이 있는 PNG라면 그 빈칸의 배경까지 물드는데, 영상·사진은
+     대부분 꽉 찬 사각형이라 그대로 둔다(오프스크린 합성은 4K에서 너무 비싸다). */
+  const tk=clamp(c.tintAmt==null?0:c.tintAmt,0,1);
+  if(tk>0){
+    g.filter='none';
+    g.globalCompositeOperation=(c.tintMode==='screen')?'screen':'multiply';
+    g.globalAlpha=clamp(alpha,0,1)*tk;
+    g.fillStyle=c.tint||'#FFFFFF';
+    g.fillRect(-dw/2,-dh/2,dw,dh);
+  }
   g.restore();
   if(R.preview) HIT.push({id:'mc:'+c.id, x:cx-dw/2, y:cy-dh/2, w:dw, h:dh});
 }
@@ -9149,6 +9200,15 @@ function propsRenderMulti(){
     };
     drop('mFilter','색 필터',c=>c.filter,FILTER_NAMES,(c,v)=>c.filter=v);
     mk('mFAmt','필터 세기',vids,c=>(c.filterAmt==null?1:c.filterAmt),(c,v)=>c.filterAmt=v/100,0,100,v=>v*100,v=>v+'%');
+    mk('mBri','밝기',vids,c=>(c.bri==null?1:c.bri),(c,v)=>c.bri=v/100,20,200,v=>v*100,v=>v+'%');
+    mk('mCon','대비',vids,c=>(c.con==null?1:c.con),(c,v)=>c.con=v/100,20,200,v=>v*100,v=>v+'%');
+    mk('mSat','채도',vids,c=>(c.sat==null?1:c.sat),(c,v)=>c.sat=v/100,0,200,v=>v*100,v=>v+'%');
+    {                                        /* 색 입히기 — 고른 클립 전부에 같은 색 */
+      const uni=same(vids,c=>c.tint||'#FFFFFF');
+      rows.push(`<div class="prow"><label>색 입히기${uni?'':' 「혼합」'}</label><label class="colorpick"><input type="color" id="mTint" value="${uni?(vids[0].c.tint||'#FFFFFF'):'#FFFFFF'}">RGB 색 고르기</label></div>`);
+    }
+    mk('mTintAmt','색 세기',vids,c=>(c.tintAmt||0),(c,v)=>c.tintAmt=v/100,0,100,v=>v*100,v=>v+'%');
+    drop('mTintMode','섞는 방식',c=>(c.tintMode||'multiply'),{multiply:'어둡게(곱하기)',screen:'밝게(스크린)'},(c,v)=>c.tintMode=v);
     drop('mTrans','다음 클립으로 전환효과',c=>c.trans.type,TRANS_NAMES,(c,v)=>c.trans.type=v);
     mk('mTransD','전환 길이',vids,c=>c.trans.dur,(c,v)=>c.trans.dur=v/10,2,20,v=>v*10,v=>(v/10).toFixed(1)+'s',true);
   }
@@ -9174,6 +9234,16 @@ function propsRenderMulti(){
       markUndo();
       for(const {c} of vids) d.set(c,el.value);
       renderTL(); drawNow();
+    });
+  }
+  {                                          /* 색 입히기 — 고른 클립 전부에 같은 색 */
+    const el=$('mTint');
+    if(el) el.addEventListener('input',()=>{
+      markUndo();
+      for(const {c} of vids){ c.tint=el.value; if(!c.tintAmt) c.tintAmt=.35; }
+      const s2=$('mTintAmt');
+      if(s2 && +s2.value===0){ s2.value=35; if($('mTintAmtV')) $('mTintAmtV').textContent='35%'; }
+      drawNow();
     });
   }
 }
@@ -9207,6 +9277,13 @@ function propsRender(){
     rows.push(`<div class="prow"><label>색 필터</label><select id="pFilter">${
       Object.entries(FILTER_NAMES).map(([k,n])=>`<option value="${k}"${c.filter===k?' selected':''}>${n}</option>`).join('')}</select></div>`);
     rows.push(sld('pFAmt','필터 세기',Math.round((c.filterAmt==null?1:c.filterAmt)*100),0,100,Math.round((c.filterAmt==null?1:c.filterAmt)*100)+'%'));
+    rows.push(sld('pBri','밝기',Math.round((c.bri==null?1:c.bri)*100),20,200,Math.round((c.bri==null?1:c.bri)*100)+'%'));
+    rows.push(sld('pCon','대비',Math.round((c.con==null?1:c.con)*100),20,200,Math.round((c.con==null?1:c.con)*100)+'%'));
+    rows.push(sld('pSat','채도',Math.round((c.sat==null?1:c.sat)*100),0,200,Math.round((c.sat==null?1:c.sat)*100)+'%'));
+    rows.push(`<div class="prow"><label>색 입히기</label><label class="colorpick"><input type="color" id="pTint" value="${c.tint||'#FFFFFF'}">RGB 색 고르기</label></div>`);
+    rows.push(sld('pTintAmt','색 세기',Math.round((c.tintAmt||0)*100),0,100,Math.round((c.tintAmt||0)*100)+'%'));
+    rows.push(`<div class="prow"><label>섞는 방식</label><select id="pTintMode"><option value="multiply"${(c.tintMode||'multiply')==='multiply'?' selected':''}>어둡게(곱하기)</option><option value="screen"${c.tintMode==='screen'?' selected':''}>밝게(스크린)</option></select></div>`);
+    rows.push('<div class="hint2">색 세기가 0이면 원본 그대로입니다. 되돌리려면 밝기·대비·채도 100%, 색 세기 0%.</div>');
     rows.push(`<div class="prow"><label>다음 클립으로 전환효과</label><select id="pTrans">${
       Object.entries(TRANS_NAMES).map(([k,n])=>`<option value="${k}"${c.trans.type===k?' selected':''}>${n}</option>`).join('')}</select></div>`);
     rows.push(sld('pTransD','전환 길이',Math.round(c.trans.dur*10),2,20,c.trans.dur.toFixed(1)+'s'));
@@ -9237,6 +9314,14 @@ function propsRender(){
   bindS('pVol',v=>c.vol=v/100,v=>v+'%');
   bindS('pFi',v=>c.fadeIn=v/10,v=>(v/10).toFixed(1)+'s');
   bindS('pFAmt',v=>c.filterAmt=v/100,v=>v+'%');
+  bindS('pBri',v=>c.bri=v/100,v=>v+'%');
+  bindS('pCon',v=>c.con=v/100,v=>v+'%');
+  bindS('pSat',v=>c.sat=v/100,v=>v+'%');
+  bindS('pTintAmt',v=>c.tintAmt=v/100,v=>v+'%');
+  bindT('pTintMode',el=>c.tintMode=el.value);
+  { const el=$('pTint'); if(el) el.addEventListener('input',()=>{ markUndo(); c.tint=el.value;
+      if(!c.tintAmt){ c.tintAmt=.35; const s2=$('pTintAmt'); if(s2){ s2.value=35; if($('pTintAmtV')) $('pTintAmtV').textContent='35%'; } }
+      drawNow(); }); }
   bindS('pFo',v=>c.fadeOut=v/10,v=>(v/10).toFixed(1)+'s');
   bindS('pScale',v=>c.tx.scale=v/100,v=>v+'%');
   bindS('pRot',v=>c.tx.rot=v,v=>v+'°');
@@ -10570,6 +10655,7 @@ function startRT(){
   const mime=pickMime();
   if(!mime){ setStatus('이 브라우저는 영상 인코딩을 지원하지 않습니다. Chrome 최신 버전을 사용해 주세요.'); return; }
   ensureCtx();
+  setPreviewRate(1);            /* 화면을 그대로 담는 방식이라 배속이 걸리면 결과물도 빨라진다 */
   rtChunks=[];
   const vs=canvas.captureStream(30);
   const stream=new MediaStream([...vs.getVideoTracks(), ...destNode.stream.getAudioTracks()]);
