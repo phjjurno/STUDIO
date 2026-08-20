@@ -7745,6 +7745,17 @@ function drawLyricVideo(t){
   const cx=LV.x*w, cy=LV.y*h;
   const active=(t>=cs[idx].start && t<clipEnd(cs[idx]));
   const lt=active? t-cs[idx].start : 0;
+  /* 가사가 없는 구간(간주·곡 끝난 뒤·가사를 안 넣은 곡)에는 아무것도 남기지 않는다.
+     예전에는 다음 줄과 그 앞뒤 줄이 흐리게 떠 있어서 빈 구간이 비어 보이지 않았다.
+     줄 사이 짧은 틈에서 깜빡이지 않도록 0.35초에 걸쳐 빠지고 든다. */
+  const GAP_FADE=.35;
+  let gapFade=1;
+  if(!active){
+    let prevEnd=-1e9;
+    for(const c of cs) if(clipEnd(c)<=t && clipEnd(c)>prevEnd) prevEnd=clipEnd(c);
+    const nextStart=(cs[idx].start>t)? cs[idx].start : 1e9;
+    gapFade=Math.max(1-clamp((t-prevEnd)/GAP_FADE,0,1), 1-clamp((nextStart-t)/GAP_FADE,0,1));
+  }
   const wt=Math.max(700,F.weight);
   const mainFont=`${wt} ${fsMain}px ${F.fam},'Noto Sans KR',sans-serif`;
   const sideFont=`${wt} ${fsSide}px ${F.fam},'Noto Sans KR',sans-serif`;
@@ -7772,6 +7783,12 @@ function drawLyricVideo(t){
   const trBlockH=trRows.length*lineH(fsTr);
   const blockH=mainBlockH+trGap+trBlockH;
 
+  if(gapFade<=.004){                     /* 가사 없는 구간 — 한 글자도 그리지 않는다 */
+    g.restore();
+    if(R.preview){ const half=blockH/2 + fsMain*.45;
+      HIT.push({id:'lyricv', x:cx-w*.44, y:cy-half, w:w*.88, h:half*2}); }
+    return;
+  }
   /* 등장 모션 */
   let a=1, dy=0, sc=1;
   if(active && LV.anim){
@@ -7779,7 +7796,7 @@ function drawLyricVideo(t){
     a=Math.min(1,lt/.18); dy=(1-e)*fsMain*.42; sc=.96+.04*e;
     const rem=clipEnd(cs[idx])-t;
     if(rem<.25) a*=Math.max(0,rem/.25);
-  }else if(!active) a=LV.dim;
+  }else if(!active) a=LV.dim*gapFade;
 
   /* 앞뒤 줄 — 흐리게 (앞뒤 흐름 모드에서만) */
   const drawSide=(i, dir)=>{
@@ -7788,7 +7805,7 @@ function drawLyricVideo(t){
     const rows=wrapLines(g, cs[i].text, w*.86);
     const bH=rows.length*lineH(fsSide);
     const y0=cy + dir*(blockH*.5 + fsMain*.55 + bH*.5);
-    g.globalAlpha=LV.dim; g.fillStyle=LV.color2;
+    g.globalAlpha=LV.dim*gapFade; g.fillStyle=LV.color2;
     rows.forEach((L,k)=>g.fillText(L, cx, y0+(k-(rows.length-1)/2)*lineH(fsSide)));
     g.globalAlpha=1;
   };
@@ -7799,7 +7816,7 @@ function drawLyricVideo(t){
     g.font=mainFont; let mw=0;
     mainRows.forEach(L=>mw=Math.max(mw,g.measureText(L).width));
     if(trRows.length){ g.font=trFont; trRows.forEach(L=>mw=Math.max(mw,g.measureText(L).width)); }
-    g.save(); g.globalAlpha=Math.min(1,Math.max(a,LV.dim));
+    g.save(); g.globalAlpha=Math.min(1,Math.max(a,LV.dim*gapFade));
     if(mode==='card'){
       const padX=fsMain*.6, bw=mw+padX*2, bh=blockH+fsMain*.9;
       g.fillStyle='rgba(12,14,18,.52)';
