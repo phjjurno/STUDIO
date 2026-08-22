@@ -34,15 +34,17 @@ body{display:flex;flex-direction:column;overflow:hidden;min-width:980px}
 
 /* ── 본문 3단 ── */
 #wrap{flex:1;display:flex;min-height:0}
-/* 도구 패널은 미리보기 오른쪽에 둔다 — 탭 버튼은 상단 바에 있고, 누르면 열린다 */
-#side{width:340px;flex:0 0 340px;order:2;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
-#side.closed{display:none}
-#center{order:1}
-#props{order:3}
-#sideTabs{display:flex;gap:3px;flex:0 0 auto}
-#sideTabs button{background:none;border:1px solid transparent;border-radius:99px;color:var(--dim);font-size:12.5px;font-weight:700;font-family:inherit;padding:6px 12px;cursor:pointer;white-space:nowrap}
-#sideTabs button:hover{color:var(--mist)}
-#sideTabs button.on{color:var(--mist);border-color:var(--line);background:var(--panel2)}
+#side{width:320px;flex:0 0 320px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+#sideTabs{display:flex;border-bottom:1px solid var(--line);flex:0 0 auto}
+#sideTabs button{flex:1;background:none;border:none;color:var(--dim);font-size:12.5px;font-weight:700;font-family:inherit;padding:10px 4px;cursor:pointer;border-bottom:2px solid transparent}
+#sideTabs button.on{color:var(--mist);border-bottom-color:var(--mist)}
+/* 프로젝트 목록은 미리보기 오른쪽에서 열린다 (상단 「프로젝트」 버튼) */
+#side{order:1} #center{order:2} #props{order:3} #projPanel{order:4}
+#projPanel{width:300px;flex:0 0 300px;border-left:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:14px;display:flex;flex-direction:column;min-height:0}
+#projPanel.closed{display:none}
+#projPanel h3{font-size:12px;font-weight:700;color:var(--mist);letter-spacing:.1em;margin-bottom:12px}
+#projPanel .tabPane{display:block;padding:0;overflow:visible}
+#projPanelBtn.on{border-color:var(--mist);color:var(--text)}
 .tabPane{display:none;overflow-y:auto;padding:14px;flex:1;min-height:0}
 .tabPane.on{display:block}
 #center{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;padding:14px;gap:10px;overflow:hidden}
@@ -107,6 +109,17 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .grp:not(.open) .chev{transform:rotate(-90deg)}
 .grp-b{padding:2px 13px 13px;display:none}
 .grp.open .grp-b{display:block}
+/* 칸 안의 작은 접이 묶음 — 제목처럼 항목이 많은 칸을 잘라 쓴다 */
+.sub{border-top:1px solid var(--line);margin:0 -13px}
+.sub:first-child{border-top:none}
+.sub-h{padding:9px 13px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+.sub-h:hover{color:var(--mist)}
+.sub-h .chev{margin-left:auto;font-size:10px;transition:transform .2s}
+.sub.open>.sub-h{color:var(--mist)}
+.sub.open>.sub-h .chev{transform:rotate(180deg)}
+.sub-b{padding:0 13px 12px;display:none}
+.sub.open>.sub-b{display:block}
+.sub-b .opt-label:first-child{margin-top:2px}
 #bgControls{display:none;width:100%}
 #bgControls.show{display:block}
 
@@ -276,19 +289,20 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
   <div class="brand">Pulseorign Studio <span>v3.0</span></div>
   <input type="text" id="projName" placeholder="프로젝트 이름" maxlength="40">
   <button class="chip" id="projSave">💾 저장</button>
-  <div id="sideTabs">
-    <button data-tab="tabMedia">미디어</button>
-    <button data-tab="tabDesign">디자인</button>
-    <button data-tab="tabSubs">자막</button>
-    <button data-tab="tabShorts">쇼츠</button>
-    <button data-tab="tabProj">프로젝트</button>
-  </div>
+  <button class="chip" id="projPanelBtn" title="저장한 프로젝트 목록 — 미리보기 오른쪽에 열립니다">🗂 프로젝트</button>
   <div class="sp"></div>
   <button id="exportBtn">⚡ 내보내기</button>
 </header>
 
 <div id="wrap">
-  <aside id="side" class="closed">
+  <aside id="side">
+    <div id="sideTabs">
+      <button class="on" data-tab="tabMedia">미디어</button>
+      <button data-tab="tabDesign">디자인</button>
+      <button data-tab="tabSubs">자막</button>
+      <button data-tab="tabShorts">쇼츠</button>
+    </div>
+
     <!-- 미디어 탭 -->
     <div class="tabPane on" id="tabMedia">
       <div class="drop" id="drop">
@@ -457,7 +471,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div></div>
 
       <div class="grp"><div class="grp-h">제목 · 트랙번호<span class="chev">▾</span></div><div class="grp-b">
-      <div class="opt-label">제목 폰트</div>
+
+      <div class="sub open"><div class="sub-h">폰트 · 크기<span class="chev">▾</span></div><div class="sub-b">
       <div class="row" id="fontRow">
         <button class="chip on" data-f="0" style="font-family:'Noto Sans KR';font-weight:900">고딕</button>
         <button class="chip" data-f="1" style="font-family:'Jua'">둥근 주아</button>
@@ -511,13 +526,28 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <input type="range" id="titleSize" min="50" max="170" value="100"></div>
       </div>
       <div class="hint2" style="margin:6px 0">✅ 모든 폰트는 Google Fonts <b>OFL/Apache</b> 라이선스 — 유튜브 등 <b>상업적 이용 가능</b>합니다.</div>
-      <div class="opt-label">색상</div>
-      <div class="row">
+      </div></div>
+
+      <div class="sub"><div class="sub-h">색상 · 가독성<span class="chev">▾</span></div><div class="sub-b">
+      <div class="row" style="margin-top:8px">
         <label class="colorpick"><input type="color" id="titleColor" value="#FFFFFF">제목 색</label>
-        <label class="colorpick"><input type="color" id="waveColor" value="#FFFFFF">파형 색</label>
+        <label class="colorpick"><input type="color" id="titleStrokeColor" value="#000000">외곽선 색</label>
       </div>
       <div class="opt-label">추천 팔레트 (제목+파형 세트)</div>
       <div class="row" id="paletteRow"></div>
+      <div class="opt-label">배경이 밝거나 복잡할 때</div>
+      <div class="sliders">
+        <div class="slider"><label>글자 불투명도 <span class="slider-rhs"><b id="titleOpV" style="display:none">100%</b><input type="number" class="snum" id="titleOpN" min="20" max="100" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="titleOp" min="20" max="100" value="100"></div>
+        <div class="slider"><label>외곽선 두께 <span class="slider-rhs"><b id="titleStrV" style="display:none">0%</b><input type="number" class="snum" id="titleStrN" min="0" max="30" value="0"><small class="usuf">%</small></span></label>
+          <input type="range" id="titleStr" min="0" max="30" value="0"></div>
+        <div class="slider"><label>뒤 어둡게 <span class="slider-rhs"><b id="titlePlateV" style="display:none">0%</b><input type="number" class="snum" id="titlePlateN" min="0" max="90" value="0"><small class="usuf">%</small></span></label>
+          <input type="range" id="titlePlate" min="0" max="90" value="0"></div>
+      </div>
+      <div class="hint2">밝은 배경에서 글씨가 묻히면 <b>외곽선 두께</b>를 5~12%, 그래도 안 되면 <b>뒤 어둡게</b>를 30~50%로 올려 보세요.</div>
+      </div></div>
+
+      <div class="sub"><div class="sub-h">효과 · 스타일<span class="chev">▾</span></div><div class="sub-b">
       <div class="opt-label">효과</div>
       <div class="row" id="fxRow">
         <button class="chip" data-fx="glow0">글로우 없음</button>
@@ -528,8 +558,13 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip on" data-fx="vignette">비네트</button>
         <button class="chip on" data-fx="title">제목 표시</button>
       </div>
-      <div class="opt-label">곡이 바뀔 때 제목 등장</div>
-      <div class="row" id="titleAnimRow">
+      <div class="opt-label">제목 색감</div>
+      <div class="row" id="titleHueRow"></div>
+      <div class="hint2" style="margin-top:6px">색감은 <b>제목 색</b>을 바꿉니다. 테이프는 이 색이 띠 색이 되고 글자는 밝기에 따라 자동으로 검정/흰색이 됩니다.</div>
+      </div></div>
+
+      <div class="sub"><div class="sub-h">곡이 바뀔 때 등장<span class="chev">▾</span></div><div class="sub-b">
+      <div class="row" id="titleAnimRow" style="margin-top:8px">
         <button class="chip on" data-tan="rise">올라오기</button>
         <button class="chip" data-tan="fade">부드럽게</button>
         <button class="chip" data-tan="drop">내려오기</button>
@@ -541,8 +576,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-tan="wipe">쓸어내기</button>
         <button class="chip" data-tan="none">없음</button>
       </div>
-      <div class="opt-label">제목 스타일</div>
-      <div class="row" id="titleFxRow">
+      </div></div>
+
+      <div class="sub"><div class="sub-h">제목 스타일<span class="chev">▾</span></div><div class="sub-b">
+      <div class="row" id="titleFxRow" style="margin-top:8px">
         <button class="chip on" data-tfx="none">기본</button>
         <button class="chip" data-tfx="outline">외곽선</button>
         <button class="chip" data-tfx="longshadow">롱 섀도우</button>
@@ -555,11 +592,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-tfx="holo">홀로그램</button>
         <button class="chip" data-tfx="riso">리소 그레인</button>
       </div>
-      <div class="opt-label">제목 색감</div>
-      <div class="row" id="titleHueRow"></div>
-      <div class="hint2" style="margin-top:6px">색감은 <b>제목 색</b>을 바꿉니다. 테이프는 이 색이 띠 색이 되고 글자는 밝기에 따라 자동으로 검정/흰색이 됩니다.</div>
-      <div class="opt-label">트랙 번호 라벨 (TRACK 01 / 08)</div>
-      <div class="row">
+      </div></div>
+
+      <div class="sub"><div class="sub-h">트랙 번호 라벨 (TRACK 01 / 08)<span class="chev">▾</span></div><div class="sub-b">
+      <div class="row" style="margin-top:8px">
         <button class="chip on" id="tlbShowBtn">라벨 표시</button>
         <button class="chip on" id="tlbLinkBtn">제목 색 연동</button>
         <button class="chip" id="tlbBgBtn">배경 박스</button>
@@ -571,7 +607,13 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="prow"><select id="tlbFontSel"></select></div>
       </div></div>
 
+      </div></div>
+
       <div class="grp"><div class="grp-h">파형<span class="chev">▾</span></div><div class="grp-b">
+      <div class="row" style="margin-top:10px">
+        <label class="colorpick"><input type="color" id="waveColor" value="#FFFFFF">파형 색</label>
+        <span class="hint2" style="margin:0">「제목」 칸의 추천 팔레트를 고르면 이 색도 함께 바뀝니다</span>
+      </div>
       <div class="opt-label">파형 스타일</div>
       <div class="row" id="waveRow">
         <button class="chip" data-wv="off">끄기</button>
@@ -788,6 +830,19 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <label class="colorpick"><input type="color" id="subColor2" value="#FFD400">강조 색</label>
         <button class="chip on" id="subAnimBtn">애니메이션 켬</button>
       </div>
+      <div class="opt-label" style="margin-top:10px">가독성 — 배경이 밝거나 복잡할 때</div>
+      <div class="sliders">
+        <div class="slider"><label>글자 불투명도 <span class="slider-rhs"><b id="subOpV" style="display:none">100%</b><input type="number" class="snum" id="subOpN" min="20" max="100" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="subOp" min="20" max="100" value="100"></div>
+        <div class="slider"><label>외곽선 두께 <span class="slider-rhs"><b id="subStrV" style="display:none">0%</b><input type="number" class="snum" id="subStrN" min="0" max="30" value="0"><small class="usuf">%</small></span></label>
+          <input type="range" id="subStr" min="0" max="30" value="0"></div>
+        <div class="slider"><label>뒤 어둡게 <span class="slider-rhs"><b id="subPlateV" style="display:none">0%</b><input type="number" class="snum" id="subPlateN" min="0" max="90" value="0"><small class="usuf">%</small></span></label>
+          <input type="range" id="subPlate" min="0" max="90" value="0"></div>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <label class="colorpick"><input type="color" id="subStrokeColor" value="#000000">외곽선 색</label>
+      </div>
+      <div class="hint2">「기본 외곽선」 템플릿에는 이미 검은 테두리가 들어 있어요. 다른 템플릿에서 글씨가 묻힐 때 올려 보세요.</div>
       <div class="opt-label" style="margin-top:10px">번역 줄 (가사 해석)</div>
       <div class="hint2">LRC에 같은 시각이 두 번 나오면 첫 줄을 원문, 둘째 줄을 번역으로 읽어 <b>위=원문 / 아래=번역</b>으로 함께 보여줍니다.</div>
       <div class="row" style="margin-top:6px">
@@ -933,7 +988,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div></div>
     </div>
 
-    <div class="tabPane" id="tabProj">
+  </aside>
+
+  <aside id="projPanel" class="closed">
+    <h3>프로젝트</h3>
+    <div class="tabPane on" id="tabProj">
       <div class="row" style="gap:6px;align-items:center;margin-top:6px">
         <button class="chip" id="projLinkBtn" style="display:none"></button>
         <button class="chip" id="projRelink" style="display:none;border-color:var(--amber);color:var(--amber)">🔗 파일 다시 연결</button>
@@ -3004,6 +3063,8 @@ const state = {
   trackLabel:{show:true, link:true, color:'#FFFFFF', bgOn:false, bg:'#000000', fontIdx:-1},
   waveColor:'#FFFFFF', titleColor:'#FFFFFF', waveDyn:.45, cutMode:false, tape:{on:false, shift:0, vol:.55, lead:0, len:null, fit:'tail'}, linkAssets:false, missingAssets:null,
   glow:1, titleFx:'none', titleAnim:'rise', shadowOn:true, vignette:true, titleScale:1, showTitle:true,
+  /* 가독성 — 배경이 밝거나 복잡할 때 글자를 살린다 */
+  titleOpacity:1, titleStroke:0, titleStrokeColor:'#000000', titlePlate:0,
   font:null, titleShownAt:0,
   /* 자막 스타일 */
   /* 리릭 비디오 — SRT 를 가운데 크게 띄우는 모드 */
@@ -3012,6 +3073,7 @@ const state = {
     trans:true, mode:'context', trSize:.62, trGap:.70},   /* 번역 줄 크기·원문과 간격 */
   /* 간격은 원문 글자 크기 기준. 0.62 아래로 내리면 원문과 겹친다(줄높이 1.24의 절반). */
   subStyle:{template:'outline', fontIdx:0, size:1, color:'#FFFFFF', color2:'#FFD400', x:.5, y:.86, anim:true,
+    opacity:1, stroke:0, strokeColor:'#000000', plate:0,             /* 가독성 */
     tr:{show:true, fontIdx:0, size:.78, color:'#BFD0E2', gap:.34}},   /* 번역(아랫줄) */
   /* 진행 바 */
   progressBar:{show:true, x:.5, y:.88, w:.72, h:.025, style:'glass',
@@ -6445,7 +6507,7 @@ function drawTitle(title, idx, total, progress, tNow){
     else titleAnimPreview=0;
   }
   const AN=titleAnimAt(state.titleAnim||'rise', k, w, h);
-  const fadeIn=AN.a;
+  const fadeIn=AN.a*(state.titleOpacity==null?1:state.titleOpacity);
   const rise=AN.dy;
   g.save(); g.globalAlpha=fadeIn;
   g.textAlign='center';
@@ -6489,6 +6551,27 @@ function drawTitle(title, idx, total, progress, tNow){
     try{ g.letterSpacing='0em'; }catch(e){}
   }
 
+  /* 뒤 어둡게 — 밝은 배경에서 글자가 묻힐 때 깔아 주는 판.
+     박스(TL.bgOn)와 달리 테두리 없이 가장자리가 풀리게 그린다. */
+  const plate=clamp(state.titlePlate||0,0,1);
+  if(plate>0.004){
+    setFont();
+    const tw=g.measureText(title||' ').width;
+    let left=tx-tw/2, right=tx+tw/2, top=ty+rise-fs*.92, bot=ty+rise+fs*.30;
+    if(showLabel){
+      left=Math.min(left, lx-lw/2); right=Math.max(right, lx+lw/2);
+      top =Math.min(top,  ly+rise-lfs*.95); bot=Math.max(bot, ly+rise+lfs*.45);
+    }
+    const padX=fs*.9, padY=fs*.55;
+    const bx=left-padX, by=top-padY, bw=(right-left)+padX*2, bh=(bot-top)+padY*2;
+    g.save();
+    g.shadowColor='transparent'; g.shadowBlur=0; g.shadowOffsetY=0;
+    try{ g.filter=`blur(${(fs*.35).toFixed(1)}px)`; }catch(e){}
+    g.fillStyle=`rgba(0,0,0,${(plate*.92).toFixed(3)})`;
+    roundRect(g,bx,by,bw,bh,Math.min(bh*.45, fs*.8)); g.fill();
+    g.restore();
+    if(state.shadowOn){ g.shadowColor='rgba(0,0,0,.5)'; g.shadowBlur=w*.006; g.shadowOffsetY=2; }
+  }
   /* 통합 배경 박스 — 제목 + 트랙번호를 함께 감쌈 */
   if(TL.bgOn){
     setFont();
@@ -6638,6 +6721,16 @@ function drawTitle(title, idx, total, progress, tNow){
     }else if(fx==='tape'||fx==='sticker'){
       g.fillStyle= fx==='tape'? tInk : TC;
     }else g.fillStyle=TC;
+    /* 외곽선 — 밝은 배경에서 글자가 묻힐 때. 채우기 바로 앞에 둘러야 글자를 안 덮는다 */
+    const strk=clamp(state.titleStroke||0,0,.3);
+    if(strk>.002){
+      g.save();
+      g.lineJoin='round'; g.lineCap='round'; g.miterLimit=2;
+      g.strokeStyle=state.titleStrokeColor||'#000000';
+      g.lineWidth=Math.max(1, fs*strk*2);       /* 선은 글자 안팎으로 반씩 걸린다 */
+      g.strokeText(TXT, tx, TY);
+      g.restore();
+    }
     g.fillText(TXT, tx, TY);
     /* ── 글자 위에 얹는 질감 ── */
     if(fx==='steel'){                           /* 브러시드 결 — 글자 모양 안에만 남긴다 */
@@ -8153,7 +8246,7 @@ function drawSubs(t){
     for(const wd of L){ wd.x=x; x+=wd.w+spaceW; }
     L.tw=tw;
   }
-  let alpha= st.anim? Math.min(1, lt/.15) : 1;
+  let alpha= (st.anim? Math.min(1, lt/.15) : 1) * (st.opacity==null?1:st.opacity);
   g.globalAlpha=clamp(alpha,0,1);
   const shadow=on=>{ if(on){ g.shadowColor='rgba(0,0,0,.6)'; g.shadowBlur=w*.005; g.shadowOffsetY=2; }
     else { g.shadowColor='transparent'; g.shadowBlur=0; g.shadowOffsetY=0; } };
@@ -8188,9 +8281,39 @@ function drawSubs(t){
   };
   const INK=inkOn(st.color2);
 
+  /* 뒤 어둡게 — 배경이 밝을 때 글자를 살린다. 원문+번역 블록 전체에 한 번 깐다 */
+  const plate=clamp(st.plate||0,0,1);
+  if(plate>0.004){
+    let wide=0;
+    for(const L of lines) wide=Math.max(wide,L.tw);
+    for(const L of trLines){ const prev=g.font;
+      g.font=`600 ${trFs}px sans-serif`; wide=Math.max(wide,g.measureText(L).width); g.font=prev; }
+    const padX=fs*.85, padY=fs*.5;
+    const top=y0-fs, bot=byBase+trH+fs*.25;
+    g.save();
+    g.shadowColor='transparent'; g.shadowBlur=0; g.shadowOffsetY=0;
+    try{ g.filter=`blur(${(fs*.32).toFixed(1)}px)`; }catch(e){}
+    g.fillStyle=`rgba(0,0,0,${(plate*.92).toFixed(3)})`;
+    roundRect(g, cx-wide/2-padX, top-padY, wide+padX*2, (bot-top)+padY*2,
+              Math.min(fs*.8, (bot-top)*.5)); g.fill();
+    g.restore();
+  }
+  /* 손으로 올린 외곽선 — 템플릿이 그리기 전에 글자마다 한 번 둘러 준다 */
+  const uStrk=clamp(st.stroke||0,0,.3);
+  const userStroke=L=>{
+    if(uStrk<=.002) return;
+    g.save();
+    g.lineJoin='round'; g.lineCap='round'; g.miterLimit=2;
+    g.strokeStyle=st.strokeColor||'#000000';
+    g.lineWidth=Math.max(1, fs*uStrk*2);
+    g.shadowColor='transparent'; g.shadowBlur=0;
+    for(const wd of L) g.strokeText(wd.txt, wd.x, L.ly);
+    g.restore();
+  };
   lines.forEach((L,li)=>{
     const ly=y0+li*lineH;
     const lx=cx-L.tw/2;
+    L.ly=ly; userStroke(L);
     if(T==='outline'){
       shadow(false);
       g.lineJoin='round'; g.strokeStyle='#000'; g.lineWidth=Math.max(2,fs*.16);
@@ -9236,6 +9359,14 @@ $('lvColor2').addEventListener('input',e=>{ state.lyric.color2=e.target.value; d
 bindSlider('lvSize','lvSizeV',v=>state.lyric.size=v/100);
 bindSlider('lvSide','lvSideV',v=>state.lyric.sideSize=v/100);
 bindSlider('lvDim','lvDimV',v=>state.lyric.dim=v/100);
+bindSlider('subOp','subOpV',v=>state.subStyle.opacity=v/100);
+bindSlider('subStr','subStrV',v=>state.subStyle.stroke=v/100);
+bindSlider('subPlate','subPlateV',v=>state.subStyle.plate=v/100);
+$('subStrokeColor').addEventListener('input',e=>{ state.subStyle.strokeColor=e.target.value; drawNow(); });
+bindSlider('titleOp','titleOpV',v=>state.titleOpacity=v/100);
+bindSlider('titleStr','titleStrV',v=>state.titleStroke=v/100);
+bindSlider('titlePlate','titlePlateV',v=>state.titlePlate=v/100);
+$('titleStrokeColor').addEventListener('input',e=>{ state.titleStrokeColor=e.target.value; drawNow(); });
 bindSlider('lvTrSize','lvTrSizeV',v=>{ state.lyric.trSize=v/100; mirrorLvTr(); });
 bindSlider('lvTrGap','lvTrGapV',v=>{ state.lyric.trGap=v/100; mirrorLvTr(); });
 /* 쇼츠 탭에도 같은 조절기를 두고 양쪽을 붙여 둔다 — 어느 쪽을 만져도 같이 움직인다 */
@@ -10389,18 +10520,21 @@ document.querySelectorAll('.grp-h').forEach(h=>{
   h.addEventListener('click',()=>h.parentElement.classList.toggle('open'));
 });
 /* 사이드 탭 */
-/* 탭을 누르면 오른쪽에 패널이 열리고, 같은 탭을 다시 누르면 닫힌다 */
-function openSideTab(name){
-  const side=$('side');
-  document.querySelectorAll('#sideTabs button').forEach(x=>x.classList.toggle('on', x.dataset.tab===name));
-  document.querySelectorAll('.tabPane').forEach(x=>x.classList.toggle('on', x.id===name));
-  side.classList.toggle('closed', !name);
-  syncHookGhost(name==='tabShorts');
-  drawNow();
-}
 document.querySelectorAll('#sideTabs button').forEach(b=>b.addEventListener('click',()=>{
-  openSideTab(b.classList.contains('on')? null : b.dataset.tab);
+  document.querySelectorAll('#sideTabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('#side .tabPane').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); $(b.dataset.tab).classList.add('on');
+  syncHookGhost(b.dataset.tab==='tabShorts');
 }));
+document.querySelectorAll('.sub-h').forEach(h=>
+  h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
+/* 프로젝트 목록 — 미리보기 오른쪽에서 열고 닫는다 */
+$('projPanelBtn').addEventListener('click',()=>{
+  const p=$('projPanel'), open=p.classList.contains('closed');
+  p.classList.toggle('closed', !open);
+  $('projPanelBtn').classList.toggle('on', open);
+  if(open) refreshProjList();
+});
 /* 전체화면 */
 const pwrap=document.querySelector('.preview-wrap');
 $('fsBtn').addEventListener('click',()=>{
@@ -10910,6 +11044,8 @@ function snapshotSettings(){
     lyric:{...state.lyric},
     tape:{...state.tape},
     glow:state.glow, titleFx:state.titleFx, titleAnim:state.titleAnim,
+    titleOpacity:state.titleOpacity, titleStroke:state.titleStroke,
+    titleStrokeColor:state.titleStrokeColor, titlePlate:state.titlePlate,
     shadowOn:state.shadowOn, vignette:state.vignette,
     titleScale:state.titleScale, showTitle:state.showTitle,
     fontIdx:Math.max(0,FONTS.indexOf(state.font)),
@@ -10931,6 +11067,10 @@ function applySettings(s){
   if(s.trackLabel) Object.assign(state.trackLabel, s.trackLabel);
   state.waveColor=s.waveColor; state.titleColor=s.titleColor;
   state.glow=s.glow; state.titleFx=s.titleFx||'none'; state.titleAnim=s.titleAnim||'rise';
+  state.titleOpacity=s.titleOpacity!=null?s.titleOpacity:1;
+  state.titleStroke=s.titleStroke||0;
+  state.titleStrokeColor=s.titleStrokeColor||'#000000';
+  state.titlePlate=s.titlePlate||0;
   state.shadowOn=s.shadowOn; state.vignette=s.vignette;
   if(s.waveDyn!=null) state.waveDyn=s.waveDyn;
   if(s.tape){ Object.assign(state.tape, s.tape); syncTapeUI(); syncTapeLenUI(); }
@@ -10950,6 +11090,10 @@ function syncUIFromState(){
   pick('tplRow',c=>c.dataset.tp===(state.template||'none'));
   pick('titleFxRow',c=>c.dataset.tfx===(state.titleFx||'none'));
   pick('titleAnimRow',c=>c.dataset.tan===(state.titleAnim||'rise'));
+  setS('titleOp','titleOpV',Math.round((state.titleOpacity??1)*100));
+  setS('titleStr','titleStrV',Math.round((state.titleStroke||0)*100));
+  setS('titlePlate','titlePlateV',Math.round((state.titlePlate||0)*100));
+  if($('titleStrokeColor')) $('titleStrokeColor').value=state.titleStrokeColor||'#000000';
   syncTitleHue();
   $('lpOpts').style.display=state.template==='lp'?'':'none';
   $('lpHint').style.display=state.template==='lp'?'':'none';
@@ -11007,6 +11151,10 @@ function syncUIFromState(){
   setS('lpBr','lpBrV',Math.round((state.el.lp&&state.el.lp.bright!=null?state.el.lp.bright:1)*100));
   setS('lpCo','lpCoV',Math.round((state.el.lp&&state.el.lp.con!=null?state.el.lp.con:1)*100));
   setS('subSize','subSizeV',Math.round(state.subStyle.size*100));
+  setS('subOp','subOpV',Math.round((state.subStyle.opacity??1)*100));
+  setS('subStr','subStrV',Math.round((state.subStyle.stroke||0)*100));
+  setS('subPlate','subPlateV',Math.round((state.subStyle.plate||0)*100));
+  if($('subStrokeColor')) $('subStrokeColor').value=state.subStyle.strokeColor||'#000000';
   setS('subY','subYV',Math.round(state.subStyle.y*100));
   $('titleColor').value=state.titleColor; $('waveColor').value=state.waveColor;
   $('subColor').value=state.subStyle.color; $('subColor2').value=state.subStyle.color2;
