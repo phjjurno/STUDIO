@@ -7109,6 +7109,296 @@ async function seekVideosAt(t){
 const VID_AHEAD_MAX=.010;
 /* 이보다 많이 앞질러 버리면 정지만으로는 못 돌아온다 — 그 프레임은 '미래 장면'이라
    결과물이 튄다. 이때만 탐색 1회로 되돌린다(드물게 일어나므로 속도 손해는 미미). */
+/* ═══════ MP4 직접 뜯어 읽기 + WebCodecs 디코딩 ═══════
+   왜 만들었나 — <video> 를 '재생'시켜 화면에 나온 그림을 캔버스로 긁는 방식은
+   ① 재생 속도에 묶이고 ② 배속을 올리면 디코더가 못 따라와 같은 프레임이 반복된다.
+   실측(1080p30 소스 → 1080×1920@30 출력, 출력 120프레임): 고유 소스 프레임 65개, 1.5배속.
+   컨테이너를 직접 뜯어 압축 패킷을 VideoDecoder 에 바로 먹이면 '재생'이라는 개념이
+   사라져서, 기계가 낼 수 있는 속도로 한 프레임씩 정확히 받아 올 수 있다.
+   MP4/MOV(avc1·hvc1)만 처리하고, 안 되는 파일은 예전 <video> 경로로 그대로 돌아간다. */
+
+/* 파일을 창(window) 단위로만 읽는다 — 48분 4K 를 통째로 메모리에 올릴 수는 없다 */
+function mp4Reader(blob, win){
+  win=win||(8<<20);
+  let buf=null, off=0;
+  return async function(pos, len){
+    if(!buf || pos<off || pos+len>off+buf.byteLength){
+      const start=pos, end=Math.min(blob.size, pos+Math.max(len, win));
+      buf=new Uint8Array(await blob.slice(start,end).arrayBuffer());
+      off=start;
+      if(buf.byteLength<len) return null;
+    }
+    return buf.subarray(pos-off, pos-off+len);
+  };
+}
+function* mp4Boxes(dv, start, end){
+  let p=start;
+  while(p+8<=end){
+    let size=dv.getUint32(p), hdr=8;
+    const type=String.fromCharCode(dv.getUint8(p+4),dv.getUint8(p+5),dv.getUint8(p+6),dv.getUint8(p+7));
+    if(size===1){ size=dv.getUint32(p+8)*4294967296+dv.getUint32(p+12); hdr=16; }
+    else if(size===0) size=end-p;
+    if(size<hdr || p+size>end) return;
+    yield {type, body:p+hdr, end:p+size};
+    p+=size;
+  }
+}
+const mp4Find=(dv,s,e,t)=>{ for(const b of mp4Boxes(dv,s,e)) if(b.type===t) return b; return null; };
+
+/* moov 를 찾아 통째로 읽는다 (파일 끝에 있는 경우도 흔하다) */
+async function mp4ReadMoov(blob){
+  const read=mp4Reader(blob, 1<<20);
+  let p=0;
+  while(p+8<=blob.size){
+    const h=await read(p,16); if(!h) return null;
+    const dv=new DataView(h.buffer, h.byteOffset, h.byteLength);
+    let size=dv.getUint32(0), hdr=8;
+    const type=String.fromCharCode(h[4],h[5],h[6],h[7]);
+    if(size===1){ size=dv.getUint32(8)*4294967296+dv.getUint32(12); hdr=16; }
+    else if(size===0) size=blob.size-p;
+    if(size<hdr) return null;
+    if(type==='moov'){
+      const bytes=new Uint8Array(await blob.slice(p, p+size).arrayBuffer());
+      return {bytes, base:p, hdr};
+    }
+    if(type==='moof') return null;          /* 조각난 MP4 — 이 파서로는 못 읽는다 */
+    p+=size;
+  }
+  return null;
+}
+
+/* 표본표(stbl)를 풀어 프레임 목록으로 만든다 */
+function mp4VideoTrack(moov){
+  const dv=new DataView(moov.bytes.buffer, moov.bytes.byteOffset, moov.bytes.byteLength);
+  const mvEnd=moov.bytes.byteLength;
+  for(const trak of mp4Boxes(dv, moov.hdr, mvEnd)){
+    if(trak.type!=='trak') continue;
+    const mdia=mp4Find(dv,trak.body,trak.end,'mdia'); if(!mdia) continue;
+    const hdlr=mp4Find(dv,mdia.body,mdia.end,'hdlr'); if(!hdlr) continue;
+    const kind=String.fromCharCode(dv.getUint8(hdlr.body+8),dv.getUint8(hdlr.body+9),
+                                   dv.getUint8(hdlr.body+10),dv.getUint8(hdlr.body+11));
+    if(kind!=='vide') continue;
+    const mdhd=mp4Find(dv,mdia.body,mdia.end,'mdhd'); if(!mdhd) continue;
+    const ver=dv.getUint8(mdhd.body);
+    const timescale=ver===1? dv.getUint32(mdhd.body+20) : dv.getUint32(mdhd.body+12);
+    const minf=mp4Find(dv,mdia.body,mdia.end,'minf'); if(!minf) continue;
+    const stbl=mp4Find(dv,minf.body,minf.end,'stbl'); if(!stbl) continue;
+
+    /* 코덱 정보 */
+    const stsd=mp4Find(dv,stbl.body,stbl.end,'stsd'); if(!stsd) continue;
+    let codec=null, desc=null, W=0, H=0;
+    for(const e of mp4Boxes(dv, stsd.body+8, stsd.end)){
+      const vs=e.body+78;                               /* VisualSampleEntry 고정부 */
+      W=dv.getUint16(e.body+24); H=dv.getUint16(e.body+26);
+      if(e.type==='avc1'||e.type==='avc3'){
+        const c=mp4Find(dv,vs,e.end,'avcC'); if(!c) continue;
+        const p1=dv.getUint8(c.body+1), p2=dv.getUint8(c.body+2), p3=dv.getUint8(c.body+3);
+        codec='avc1.'+[p1,p2,p3].map(x=>x.toString(16).padStart(2,'0')).join('');
+        desc=moov.bytes.slice(c.body, c.end);
+      }else if(e.type==='hvc1'||e.type==='hev1'){
+        const c=mp4Find(dv,vs,e.end,'hvcC'); if(!c) continue;
+        codec=e.type+'.1.6.L93.B0';
+        desc=moov.bytes.slice(c.body, c.end);
+      }
+      if(codec) break;
+    }
+    if(!codec) continue;
+
+    /* 시간·크기·위치 표 */
+    const tbl=t=>mp4Find(dv,stbl.body,stbl.end,t);
+    const stts=tbl('stts'), stsc=tbl('stsc'), stsz=tbl('stsz'), stco=tbl('stco')||tbl('co64');
+    if(!stts||!stsc||!stsz||!stco) continue;
+    const ctts=tbl('ctts'), stss=tbl('stss');
+
+    const dts=[]; {
+      const n=dv.getUint32(stts.body+4); let t=0;
+      for(let i=0;i<n;i++){
+        const cnt=dv.getUint32(stts.body+8+i*8), d=dv.getUint32(stts.body+12+i*8);
+        for(let k=0;k<cnt;k++){ dts.push(t); t+=d; }
+      }
+    }
+    const total=dts.length;
+    const cto=new Int32Array(total);
+    if(ctts){
+      const n=dv.getUint32(ctts.body+4); let s=0;
+      for(let i=0;i<n && s<total;i++){
+        const cnt=dv.getUint32(ctts.body+8+i*8), o=dv.getInt32(ctts.body+12+i*8);
+        for(let k=0;k<cnt && s<total;k++) cto[s++]=o;
+      }
+    }
+    const sizes=new Uint32Array(total); {
+      const uni=dv.getUint32(stsz.body+4), n=Math.min(total, dv.getUint32(stsz.body+8));
+      for(let i=0;i<total;i++) sizes[i]= uni? uni : (i<n? dv.getUint32(stsz.body+12+i*4) : 0);
+    }
+    const co64=stco.type==='co64';
+    const chunkOff=[]; {
+      const n=dv.getUint32(stco.body+4);
+      for(let i=0;i<n;i++) chunkOff.push(co64
+        ? dv.getUint32(stco.body+8+i*8)*4294967296+dv.getUint32(stco.body+12+i*8)
+        : dv.getUint32(stco.body+8+i*4));
+    }
+    /* 표본→청크 배치 */
+    const perChunk=[]; {
+      const n=dv.getUint32(stsc.body+4);
+      const ent=[];
+      for(let i=0;i<n;i++) ent.push({first:dv.getUint32(stsc.body+8+i*12),
+                                     spc:dv.getUint32(stsc.body+12+i*12)});
+      for(let ci=0; ci<chunkOff.length; ci++){
+        let spc=ent.length? ent[ent.length-1].spc : 1;
+        for(let i=0;i<ent.length;i++){
+          const nextFirst=(i+1<ent.length)? ent[i+1].first : Infinity;
+          if(ci+1>=ent[i].first && ci+1<nextFirst){ spc=ent[i].spc; break; }
+        }
+        perChunk.push(spc);
+      }
+    }
+    const offs=new Float64Array(total);
+    { let s=0;
+      for(let ci=0; ci<chunkOff.length && s<total; ci++){
+        let o=chunkOff[ci];
+        for(let k=0;k<perChunk[ci] && s<total;k++){ offs[s]=o; o+=sizes[s]; s++; }
+      } }
+    const keys=new Uint8Array(total);
+    if(stss){ const n=dv.getUint32(stss.body+4);
+      for(let i=0;i<n;i++){ const s=dv.getUint32(stss.body+8+i*4)-1; if(s>=0&&s<total) keys[s]=1; } }
+    else keys.fill(1);
+
+    /* 표시 순서(cts)로 정렬한 인덱스 — 프레임 찾기에 쓴다 */
+    const cts=new Float64Array(total);
+    for(let i=0;i<total;i++) cts[i]=(dts[i]+cto[i])/timescale;
+    const order=Array.from({length:total},(_,i)=>i).sort((a,b)=>cts[a]-cts[b]);
+    /* 각 프레임이 화면에 머무는 시간 */
+    const durs=new Float64Array(total);
+    for(let k=0;k<order.length;k++){
+      const i=order[k], nx=order[k+1];
+      durs[i]= nx!=null? Math.max(1/240, cts[nx]-cts[i]) : 1/30;
+    }
+    /* 회전 — <video> 는 알아서 돌려 주지만 VideoFrame 은 그대로 나온다.
+       tkhd 행렬(16.16 고정소수)에서 각도를 뽑아 그릴 때 우리가 돌린다. */
+    let rot=0;
+    const tkhd=mp4Find(dv,trak.body,trak.end,'tkhd');
+    if(tkhd){
+      const v0=dv.getUint8(tkhd.body)===0;
+      const m=tkhd.body+(v0?40:52);
+      const f=o=>dv.getInt32(m+o*4)/65536;
+      const a1=f(0), b1=f(1), c1=f(3), d1=f(4);
+      if(Math.abs(a1)<.01 && Math.abs(b1-1)<.01 && Math.abs(c1+1)<.01 && Math.abs(d1)<.01) rot=90;
+      else if(Math.abs(a1+1)<.01 && Math.abs(d1+1)<.01) rot=180;
+      else if(Math.abs(a1)<.01 && Math.abs(b1+1)<.01 && Math.abs(c1-1)<.01 && Math.abs(d1)<.01) rot=270;
+    }
+    return {codec, desc, W, H, rot, timescale, total, offs, sizes, keys,
+            dts:Float64Array.from(dts, v=>v/timescale), cts, durs, order};
+  }
+  return null;
+}
+
+/* 한 소스에 하나씩 붙는 디코더. 앞으로 순서대로 읽는 데 최적화돼 있다. */
+function makeVidDec(track, blob){
+  const read=mp4Reader(blob, 8<<20);
+  /* 미리 받아 둘 프레임 수 — 4K 한 장이 12MB 쯤이라 해상도에 맞춰 줄인다 */
+  const OUT_MAX = (track.W*track.H > 4000000)? 5 : 12;
+  const AHEAD   = (track.W*track.H > 4000000)? 8 : 20;   /* 디코더에 밀어 넣어 둘 패킷 수 */
+  let dec=null, cursor=0, out=[], dead=false, err=null;
+  const cfgOf=()=>({codec:track.codec, codedWidth:track.W, codedHeight:track.H,
+                    description:track.desc, optimizeForLatency:false});
+  const clearOut=()=>{ for(const f of out) try{f.close();}catch(e){} out=[]; };
+  const mk=()=>{
+    dec=new VideoDecoder({
+      output:f=>{ out.push(f); out.sort((a,b)=>a.timestamp-b.timestamp);
+                  while(out.length>OUT_MAX) try{out.shift().close();}catch(e){} },
+      error:e=>{ err=e; dead=true; }
+    });
+    dec.configure(cfgOf());
+  };
+  /* 디코더가 뭔가 내놓을 때까지 잠깐 양보 — setTimeout 은 숨은 탭에서 묶이므로 안 쓴다 */
+  const nudge=()=>new Promise(r=>{
+    let done=false; const fin=()=>{ if(done) return; done=true; if(dec) dec.ondequeue=null; r(); };
+    if(dec && 'ondequeue' in dec) dec.ondequeue=fin;
+    yieldTask().then(fin);
+  });
+  const keyAt=i=>{ for(let k=i;k>=0;k--) if(track.keys[k]) return k; return 0; };
+  const idxAt=t=>{                  /* 표시 시각 t 를 담고 있는 프레임의 디코드 인덱스 */
+    const o=track.order;
+    let lo=0, hi=o.length-1, ans=o[0];
+    while(lo<=hi){ const m=(lo+hi)>>1;
+      if(track.cts[o[m]]<=t+1e-6){ ans=o[m]; lo=m+1; } else hi=m-1; }
+    return ans;
+  };
+  const feed=async n=>{
+    for(let k=0;k<n && cursor<track.total && !dead;k++){
+      const b=await read(track.offs[cursor], track.sizes[cursor]);
+      if(!b){ dead=true; break; }
+      try{
+        dec.decode(new EncodedVideoChunk({
+          type: track.keys[cursor]? 'key':'delta',
+          timestamp: Math.round(track.cts[cursor]*1e6),
+          duration: Math.round(track.durs[cursor]*1e6),
+          data: b.slice()
+        }));
+      }catch(e){ err=e; dead=true; break; }
+      cursor++;
+    }
+  };
+  return {
+    get dead(){ return dead; },
+    get error(){ return err; },
+    /* 표시 시각 t 의 프레임. 시각이 정확히 일치하는 프레임만 돌려준다 —
+       「t 이하 아무거나」로 두면 아직 안 나온 사이에 옛 프레임을 집어 준다(실측 7개 중 1개만 정답). */
+    async frameAt(t){
+      if(dead) return null;
+      if(!dec) mk();
+      const target=idxAt(t);
+      const wantTs=Math.round(track.cts[target]*1e6);
+      const find=()=>{ for(const f of out) if(f.timestamp===wantTs) return f; return null; };
+      let f=find(); if(f) return f;
+      if(target<cursor-1 || target>cursor+300){       /* 되감기·큰 점프 → 키프레임부터 */
+        try{ dec.reset(); }catch(e){}
+        clearOut(); dec.configure(cfgOf());
+        cursor=keyAt(target);
+      }else if(cursor===0 && target>0){
+        cursor=keyAt(target);
+      }
+      let guard=0;
+      while(!dead && guard++<2000){
+        /* 요청을 기다리지 말고 미리 밀어 넣는다 — 디코더가 놀면 그만큼 느려진다 */
+        if(cursor<track.total && dec.decodeQueueSize<AHEAD) await feed(AHEAD-dec.decodeQueueSize);
+        f=find(); if(f) return f;
+        if(cursor>=track.total){                      /* 끝까지 먹였는데 아직 안 나옴 */
+          await dec.flush().catch(()=>{});
+          f=find(); if(f) return f;
+          break;
+        }
+        await nudge();
+      }
+      let best=null;                                  /* 못 찾으면 가장 가까운 이전 프레임 */
+      for(const g of out) if(g.timestamp<=wantTs && (!best||g.timestamp>best.timestamp)) best=g;
+      return best;
+    },
+    close(){ clearOut(); try{ dec&&dec.close(); }catch(e){} dec=null; dead=true; }
+  };
+}
+
+/* 소스에 디코더를 붙인다 — 안 되는 파일이면 조용히 예전 방식으로 남는다 */
+async function attachVidDec(a){
+  if(a.wcDec && !a.wcDec.dead) return a.wcDec;
+  if(a.wcTrack){                       /* 표본표는 한 번만 읽는다 — 48분 4K 는 표가 8만 줄이 넘는다 */
+    a.wcDec=makeVidDec(a.wcTrack, a.blob); return a.wcDec;
+  }
+  if(a.wcTried) return null;
+  a.wcTried=true;
+  try{
+    if(!('VideoDecoder' in window) || !a.blob) return null;
+    const moov=await mp4ReadMoov(a.blob); if(!moov) return null;
+    const tr=mp4VideoTrack(moov); if(!tr || !tr.total) return null;
+    const sup=await VideoDecoder.isConfigSupported({
+      codec:tr.codec, codedWidth:tr.W, codedHeight:tr.H, description:tr.desc});
+    if(!sup.supported) return null;
+    a.wcTrack=tr; a.wcRot=tr.rot||0;
+    a.wcDec=makeVidDec(tr, a.blob);
+    return a.wcDec;
+  }catch(e){ return null; }
+}
+
 /* 앞질러 버린 폭이 이보다 크면 정지만으로 못 돌아온다 → 탐색 1회로 되돌린다 */
 const VID_BEHIND_MAX=.10;
 /* 목표 시각에 도달한 뒤에도 이만큼 어긋나 있으면 그 자리에서 바로잡는다 (약 2프레임) */
@@ -7164,9 +7454,18 @@ async function advanceVideosTo(t){
     if(!prev || c.start>prev.start) act.set(a,c);      /* 전환으로 겹치면 나중 컷 기준 */
   });
   eachVideoClip((c,tr,a)=>{                            /* 아무 컷도 안 쓰는 소스만 정지 */
-    if(!act.has(a) && !a.videoEl.paused) a.videoEl.pause();
+    if(!act.has(a)){ if(!a.videoEl.paused) a.videoEl.pause(); a.wcFrame=null; }
   });
   for(const [a,c] of act){
+    /* 파일을 직접 뜯어 디코딩하는 경로가 붙어 있으면 그쪽에서 프레임을 받는다.
+       재생 속도에 묶이지 않고 프레임이 정확하다(실측 120프레임 중 고유 65 → 120). */
+    if(a.wcDec && !a.wcDec.dead){
+      if(!a.videoEl.paused) a.videoEl.pause();
+      const st=Math.min(Math.max(0,a.duration-.001), Math.max(0, srcTimeOf(c,t)));
+      waits.push(a.wcDec.frameAt(st).then(f=>{ if(f) a.wcFrame=f; })
+                        .catch(()=>{ a.wcDec=null; }));
+      continue;
+    }
     const v=a.videoEl;
     const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
     const cur=v.currentTime, drift=st-cur;
@@ -7561,7 +7860,10 @@ function drawMediaClip(c,t,fx,p){
   const {g,w,h}=R;
   let src,iw,ih;
   if(a.kind==='image'){ src=a.img; iw=a.width; ih=a.height; }
-  else if(a.kind==='video'){ src=a.videoEl; iw=a.width; ih=a.height; if(!iw||src.readyState<2){} }
+  else if(a.kind==='video'){
+    src=a.wcFrame||a.videoEl; iw=a.width; ih=a.height;
+    if(!a.wcFrame && (!iw||src.readyState<2)){}
+  }
   else return;
   if(!iw||!ih) return;
   let alpha=c.tx.opacity;
@@ -7589,7 +7891,17 @@ function drawMediaClip(c,t,fx,p){
   const cx=c.tx.x*w+ex, cy=c.tx.y*h;
   g.translate(cx,cy);
   if(c.tx.rot) g.rotate(c.tx.rot*Math.PI/180);
-  try{ g.drawImage(src,-dw/2,-dh/2,dw,dh); }catch(e){}
+  /* 파일 안에 회전이 적혀 있는 영상(폰으로 세로 촬영 등) — <video> 는 알아서 돌려 주지만
+     디코더가 낸 VideoFrame 은 안 돌아가 있으므로 여기서 돌린다. */
+  const vrot=(a.wcFrame && a.wcRot)? a.wcRot : 0;
+  try{
+    if(vrot){
+      g.rotate(vrot*Math.PI/180);
+      const rw=(vrot===90||vrot===270)? dh : dw;
+      const rh=(vrot===90||vrot===270)? dw : dh;
+      g.drawImage(src,-rw/2,-rh/2,rw,rh);
+    }else g.drawImage(src,-dw/2,-dh/2,dw,dh);
+  }catch(e){}
   /* 색 입히기 — 방금 그린 그림 자리에만 곱하기로 얹는다.
      투명한 부분이 있는 PNG라면 그 빈칸의 배경까지 물드는데, 영상·사진은
      대부분 꽉 찬 사각형이라 그대로 둔다(오프스크린 합성은 4K에서 너무 비싸다). */
@@ -10865,6 +11177,15 @@ async function startExport(){
     pauseAllVideos();
     const totalFrames=Math.ceil(outDur*FPS);
     const hasVideoClips=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
+    /* 영상 소스를 파일에서 직접 뜯어 디코딩할 수 있으면 그 경로를 쓴다.
+       MP4/MOV(H.264·H.265)만 되고, 안 되면 조용히 예전 <video> 방식으로 남는다. */
+    {
+      const seen=new Set(); let wc=0, all=0;
+      const list=[]; eachVideoClip((c,tr,a)=>{ if(!seen.has(a)){ seen.add(a); list.push(a); } });
+      for(const a of list){ all++; if(await attachVidDec(a)) wc++; }
+      if(all) setStatus(`영상 소스 ${all}개 중 ${wc}개를 <b>직접 디코딩</b>으로 읽습니다`
+                        + (wc<all? ` (${all-wc}개는 기존 방식)`:'') + ' — 인코딩을 시작합니다…');
+    }
     /* QMAX는 위에서 인코더 프로브와 같은 값으로 이미 정했다 */
 
     /* ── 구간별 믹싱+인코딩 (출력 0~outDur, 타임라인은 exStart 오프셋) ── */
@@ -11007,6 +11328,11 @@ async function startExport(){
   }finally{
     if(stash){ try{ await stash.dispose(); }catch(e){} stash=null; }
     state.rendering=false; state.cancelRender=false;
+    /* 디코더와 들고 있던 프레임 정리 — 4K 는 한 장이 12MB 쯤 된다 */
+    for(const a of state.assets.values()){
+      if(a.wcDec){ try{ a.wcDec.close(); }catch(e){} }
+      a.wcDec=null; a.wcFrame=null;      /* wcTrack 은 남겨 둔다 (다음 내보내기에서 재사용) */
+    }
     pauseAllVideos();                 /* 순차 재생으로 돌린 소스를 반드시 멈춘다 */
     eachVideoClip((c,tr,a)=>{ a.videoEl.playbackRate=1; });
     $('exportBtn').disabled=false; $('playBtn').disabled=false;
