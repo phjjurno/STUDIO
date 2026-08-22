@@ -65,6 +65,12 @@ body{display:flex;flex-direction:column;overflow:hidden;min-width:980px}
 .fsbtn:hover{color:var(--text);border-color:var(--mist)}
 .preview-wrap.fsmode{position:fixed;inset:0;z-index:130;max-height:none;border:none;border-radius:0}
 .preview-wrap.fsmode canvas{max-width:100vw;max-height:100vh}
+/* 전체화면 「채우기」 — 화면비가 다를 때 검은 여백 대신 가장자리를 잘라 꽉 채운다.
+   #canvas 가 id 선택자라 클래스만으로는 못 이긴다 — 여기서도 id 를 함께 쓴다. */
+.preview-wrap.fsmode.fill #canvas{width:100%;height:100%;max-width:none;max-height:none;object-fit:cover}
+#fillBtn{display:none;position:absolute;top:10px;right:64px;z-index:6;background:rgba(18,20,24,.72);border:1px solid var(--line);color:var(--mist);border-radius:8px;padding:6px 11px;font-size:13px;cursor:pointer;backdrop-filter:blur(4px);font-family:inherit}
+#fillBtn:hover{color:var(--text);border-color:var(--mist)}
+.preview-wrap.fsmode #fillBtn{display:block}
 #transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 #transport .tbig{background:var(--panel2);color:var(--mist);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:15px;cursor:pointer;font-family:inherit}
 #transport .tbig:hover{border-color:var(--mist)}
@@ -120,11 +126,9 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .sub-b{padding:0 13px 12px;display:none}
 .sub.open>.sub-b{display:block}
 .sub-b .opt-label:first-child{margin-top:2px}
-/* 배경 이미지 조절 — 칸 자체는 항상 보이고, 이미지가 없을 때만 안내로 바뀐다.
-   예전엔 통째로 숨겨서 「어디 갔지?」가 됐다. */
+/* 배경 이미지 조절 — 이미지가 없어도 자리는 남긴다(숨기면 어디 갔는지 못 찾는다) */
 #bgControls{display:block;width:100%}
-#bgControls.show #bgNoImg{display:none}
-#bgControls:not(.show) #bgSliders{display:none}
+#bgControls:not(.show) #bgSliders{opacity:.4;pointer-events:none}
 
 /* 플레이리스트 트랙 목록 */
 .tracklist{margin-top:10px;display:flex;flex-direction:column;gap:8px}
@@ -371,12 +375,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" id="bgImageBtn">🖼 이미지 업로드</button>
         <input type="file" id="bgFileInput" accept="image/*">
       </div>
-      <div class="hint2" style="margin-top:6px">폴더에서 이미지를 <b>미리보기 화면으로 끌어다 놓아도</b> 배경이 됩니다.</div>
       <div class="opt-label" id="bgPickLab" style="display:none">가져온 이미지에서 선택</div>
       <div class="row" id="bgPickRow"></div>
       <div id="bgControls">
-        <div class="opt-label">배경 이미지 조절 (크기 · 밝기 · 대비 · 위치)</div>
-        <div class="hint2" id="bgNoImg">위에서 <b>🖼 이미지 업로드</b>로 배경 사진을 넣으면 여기서 조절합니다.<br>타임라인 <b>V1 트랙에 올린 영상·사진</b>이 배경이라면, 그 클립을 눌러 오른쪽 <b>클립 속성</b>에서 크기·밝기·대비를 조절하세요.</div>
+        <div class="opt-label">배경 이미지 조절</div>
         <div class="sliders" id="bgSliders">
           <div class="slider"><label>크기 <span class="slider-rhs"><b id="bgScaleV" style="display:none">100%</b><input type="number" class="snum" id="bgScaleN" min="50" max="300" value="100"><small class="usuf">%</small></span></label>
             <input type="range" id="bgScale" min="50" max="300" value="100"></div>
@@ -1013,6 +1015,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
   <section id="center">
     <div class="preview-wrap"><canvas id="canvas" width="1920" height="1080"></canvas>
+      <button id="fillBtn" title="검은 여백 없이 화면에 꽉 채웁니다 (가장자리가 잘립니다)">⤢ 채우기</button>
       <button class="fsbtn" id="fsBtn" title="전체화면">⛶</button></div>
     <div id="transport">
       <button class="tbig" id="toStartBtn" title="처음으로">⏮</button>
@@ -10541,12 +10544,30 @@ $('projPanelBtn').addEventListener('click',()=>{
 });
 /* 전체화면 */
 const pwrap=document.querySelector('.preview-wrap');
+/* 전체화면에서 화면비가 다르면 위아래(또는 좌우)에 검은 띠가 남는다.
+   16:9 영상을 16:10 화면에 띄우면 위아래 45px씩이 그렇다 — 비율을 지키느라 생기는 정상적인 여백.
+   「채우기」는 가장자리를 잘라서라도 화면을 꽉 채운다. */
+function syncFillBtn(){
+  const on=pwrap.classList.contains('fill');
+  $('fillBtn').textContent = on? '⤡ 원래 비율' : '⤢ 채우기';
+  $('fillBtn').title = on? '원래 화면비로 되돌립니다 (검은 여백이 생길 수 있어요)'
+                         : '검은 여백 없이 꽉 채웁니다 (가장자리가 잘립니다)';
+}
+$('fillBtn').addEventListener('click',e=>{
+  e.stopPropagation();
+  pwrap.classList.toggle('fill');
+  syncFillBtn();
+  setStatus(pwrap.classList.contains('fill')
+    ? '전체화면 채우기 — 화면비가 달라 가장자리가 잘립니다. 내보내는 영상은 원래 비율 그대로예요.'
+    : '전체화면 원래 비율 — 화면비가 다르면 검은 여백이 생깁니다.');
+});
 $('fsBtn').addEventListener('click',()=>{
   if(pwrap.classList.contains('fsmode')){
     if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
     pwrap.classList.remove('fsmode'); $('fsBtn').textContent='⛶'; drawNow(); return;
   }
   pwrap.classList.add('fsmode'); $('fsBtn').textContent='✕';
+  syncFillBtn();
   if(pwrap.requestFullscreen) pwrap.requestFullscreen().catch(()=>{});
   drawNow();
 });
