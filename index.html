@@ -120,8 +120,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .sub-b{padding:0 13px 12px;display:none}
 .sub.open>.sub-b{display:block}
 .sub-b .opt-label:first-child{margin-top:2px}
-#bgControls{display:none;width:100%}
-#bgControls.show{display:block}
+/* 배경 이미지 조절 — 칸 자체는 항상 보이고, 이미지가 없을 때만 안내로 바뀐다.
+   예전엔 통째로 숨겨서 「어디 갔지?」가 됐다. */
+#bgControls{display:block;width:100%}
+#bgControls.show #bgNoImg{display:none}
+#bgControls:not(.show) #bgSliders{display:none}
 
 /* 플레이리스트 트랙 목록 */
 .tracklist{margin-top:10px;display:flex;flex-direction:column;gap:8px}
@@ -372,8 +375,9 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="opt-label" id="bgPickLab" style="display:none">가져온 이미지에서 선택</div>
       <div class="row" id="bgPickRow"></div>
       <div id="bgControls">
-        <div class="opt-label">배경 이미지 조절</div>
-        <div class="sliders">
+        <div class="opt-label">배경 이미지 조절 (크기 · 밝기 · 대비 · 위치)</div>
+        <div class="hint2" id="bgNoImg">위에서 <b>🖼 이미지 업로드</b>로 배경 사진을 넣으면 여기서 조절합니다.<br>타임라인 <b>V1 트랙에 올린 영상·사진</b>이 배경이라면, 그 클립을 눌러 오른쪽 <b>클립 속성</b>에서 크기·밝기·대비를 조절하세요.</div>
+        <div class="sliders" id="bgSliders">
           <div class="slider"><label>크기 <span class="slider-rhs"><b id="bgScaleV" style="display:none">100%</b><input type="number" class="snum" id="bgScaleN" min="50" max="300" value="100"><small class="usuf">%</small></span></label>
             <input type="range" id="bgScale" min="50" max="300" value="100"></div>
           <div class="slider"><label>어둡기 <span class="slider-rhs"><b id="bgDarkV" style="display:none">45%</b><input type="number" class="snum" id="bgDarkN" min="0" max="85" value="45"><small class="usuf">%</small></span></label>
