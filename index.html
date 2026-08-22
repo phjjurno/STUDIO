@@ -126,9 +126,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .sub-b{padding:0 13px 12px;display:none}
 .sub.open>.sub-b{display:block}
 .sub-b .opt-label:first-child{margin-top:2px}
-/* 배경 이미지 조절 — 이미지가 없어도 자리는 남긴다(숨기면 어디 갔는지 못 찾는다) */
-#bgControls{display:block;width:100%}
-#bgControls:not(.show) #bgSliders{opacity:.4;pointer-events:none}
+#bgControls{display:none;width:100%}
+#bgControls.show{display:block}
 
 /* 플레이리스트 트랙 목록 */
 .tracklist{margin-top:10px;display:flex;flex-direction:column;gap:8px}
@@ -981,6 +980,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <button class="chip" data-fps="60">60 fps</button>
         </div>
       </div>
+      <div class="hint2" id="shCostLine" style="margin-top:6px"></div>
       <div class="row" style="margin-top:6px;align-items:center">
         <button class="chip" id="shPickDir">📁 저장 폴더 선택</button>
         <span class="hint2" id="shDirName" style="margin:0">폴더를 고르지 않으면 브라우저 다운로드 폴더로 갑니다</span>
@@ -10113,6 +10113,25 @@ $('shAddHere').onclick=()=>{
 $('shClear').onclick=()=>{ shortsQueue=[]; shortsPick=-1; renderShortsList(); };
 $('shStop').onclick=()=>{ shortsAbort=true; state.cancelRender=true; };
 
+/* 고른 설정으로 얼마나 걸릴지 미리 보여 준다.
+   기준: 1080×1920 30fps 를 이 기계에서 재면 9.4배속(영상 소스 없을 때).
+   화소·프레임 수에 거의 비례해 느려진다 — 실측
+     1080×1920@30 9.36배 · @60 4.68배 · 2160×3840@30 2.48배 · @60 1.24배.
+   타임라인에 외부 영상이 있으면 디코딩이 더해져 여기서 다시 크게 떨어진다. */
+const SH_BASE_SPEED=9.4;
+function shCostNote(){
+  const el=$('shCostLine'); if(!el) return;
+  const W=shExp.w*shExp.scale, H=shExp.h*shExp.scale;
+  const load=(W*H*shExp.fps)/(1080*1920*30);
+  const est=SH_BASE_SPEED/load;
+  const hasVid=(()=>{ let n=0; eachVideoClip(()=>n++); return n>0; })();
+  const per30=30/Math.max(.05,est);
+  let msg=`출력 <b>${W}×${H} · ${shExp.fps}fps</b> — 표준(1080×1920 30fps)의 <b>${load.toFixed(1)}배</b> 작업량,`
+        + ` 대략 <b>${est.toFixed(1)}배속</b> (30초짜리 한 편에 약 ${Math.round(per30)}초)`;
+  if(hasVid) msg+=`<br>타임라인에 <b>영상 클립</b>이 있어 실제로는 이보다 훨씬 느립니다 — 영상 디코딩이 병목이라 1080p 소스 기준 1.5배속 언저리까지 떨어집니다.`;
+  if(load>2) msg+=`<br>⚠ <b>유튜브 쇼츠는 1080×1920이면 충분합니다</b> — 그보다 크게 뽑아도 업로드하면 다시 줄어들고 시간만 ${load.toFixed(0)}배 듭니다.`;
+  el.innerHTML=msg;
+}
 /* 내보내기 설정 칩 (해상도·화질·프레임) */
 [['shResRow',b2=>{ shExp.w=+b2.dataset.w; shExp.h=+b2.dataset.h; }],
  ['shScaleRow',b2=>{ shExp.scale=+b2.dataset.s; }],
@@ -10122,8 +10141,10 @@ $('shStop').onclick=()=>{ shortsAbort=true; state.cancelRender=true; };
     [...e.currentTarget.children].forEach(c=>c.classList.remove('on'));
     b2.classList.add('on'); fn(b2);
     $('shDirName').dataset.est='';
+    shCostNote();
   });
 });
+shCostNote();
 /* 저장 폴더 고르기 — 한 번 고르면 목록 전체가 그 안에 저장된다 */
 $('shPickDir').onclick=async()=>{
   if(!window.showDirectoryPicker){
