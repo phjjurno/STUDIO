@@ -1,5 +1,5 @@
 /* PULSEORIGN STUDIO — Service Worker v3 */
-const CACHE = 'pulseorign-v73';
+const CACHE = 'pulseorign-v74';
 const SHELL = ['./index.html', './manifest.json', './assets/lp_deck.png', './assets/lp_record.png', './assets/lp_arm.png', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {

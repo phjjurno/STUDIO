@@ -7295,27 +7295,33 @@ function mp4VideoTrack(moov){
 /* 한 소스에 하나씩 붙는 디코더. 앞으로 순서대로 읽는 데 최적화돼 있다. */
 function makeVidDec(track, blob){
   const read=mp4Reader(blob, 8<<20);
-  /* 미리 받아 둘 프레임 수 — 4K 한 장이 12MB 쯤이라 해상도에 맞춰 줄인다 */
-  const OUT_MAX = (track.W*track.H > 4000000)? 5 : 12;
-  const AHEAD   = (track.W*track.H > 4000000)? 8 : 20;   /* 디코더에 밀어 넣어 둘 패킷 수 */
-  let dec=null, cursor=0, out=[], dead=false, err=null;
+  /* 파이프라인 깊이 — 4K 한 장이 12MB 쯤이라 해상도에 맞춰 줄인다.
+     밀어 넣는 양이 들고 있을 양보다 많으면, 아직 꺼내 쓰지도 않은 프레임을 버리게 된다. */
+  const DEPTH = (track.W*track.H > 4000000)? 6 : 16;
+  let dec=null, cursor=0, out=[], dead=false, err=null, lastWant=-1;
   const cfgOf=()=>({codec:track.codec, codedWidth:track.W, codedHeight:track.H,
                     description:track.desc, optimizeForLatency:false});
   const clearOut=()=>{ for(const f of out) try{f.close();}catch(e){} out=[]; };
+  /* 디코더가 새 프레임을 내놓으면 깨워 준다 */
+  let waiter=null;
+  const wake=()=>{ if(waiter){ const w=waiter; waiter=null; w(true); } };
+  const waitOutput=ms=>new Promise(r=>{
+    let done=false;
+    const fin=v=>{ if(done) return; done=true; waiter=null; clearTimeout(to); r(v); };
+    const to=setTimeout(()=>fin(false), ms);
+    waiter=fin;
+  });
   const mk=()=>{
     dec=new VideoDecoder({
       output:f=>{ out.push(f); out.sort((a,b)=>a.timestamp-b.timestamp);
-                  while(out.length>OUT_MAX) try{out.shift().close();}catch(e){} },
+                  /* 이미 지나간 프레임만 버린다 — 아직 요청 안 한 걸 버리면 그 자리에 옛 그림이 들어간다 */
+                  while(out.length>1 && out[0].timestamp<lastWant) try{out.shift().close();}catch(e){}
+                  while(out.length>DEPTH+2) try{out.shift().close();}catch(e){}
+                  wake(); },
       error:e=>{ err=e; dead=true; }
     });
     dec.configure(cfgOf());
   };
-  /* 디코더가 뭔가 내놓을 때까지 잠깐 양보 — setTimeout 은 숨은 탭에서 묶이므로 안 쓴다 */
-  const nudge=()=>new Promise(r=>{
-    let done=false; const fin=()=>{ if(done) return; done=true; if(dec) dec.ondequeue=null; r(); };
-    if(dec && 'ondequeue' in dec) dec.ondequeue=fin;
-    yieldTask().then(fin);
-  });
   const keyAt=i=>{ for(let k=i;k>=0;k--) if(track.keys[k]) return k; return 0; };
   const idxAt=t=>{                  /* 표시 시각 t 를 담고 있는 프레임의 디코드 인덱스 */
     const o=track.order;
@@ -7333,7 +7339,7 @@ function makeVidDec(track, blob){
           type: track.keys[cursor]? 'key':'delta',
           timestamp: Math.round(track.cts[cursor]*1e6),
           duration: Math.round(track.durs[cursor]*1e6),
-          data: b.slice()
+          data: b            /* EncodedVideoChunk 가 스스로 복사한다 — 여기서 또 뜨면 4K 는 장당 수 MB 를 헛으로 옮긴다 */
         }));
       }catch(e){ err=e; dead=true; break; }
       cursor++;
@@ -7349,6 +7355,7 @@ function makeVidDec(track, blob){
       if(!dec) mk();
       const target=idxAt(t);
       const wantTs=Math.round(track.cts[target]*1e6);
+      lastWant=wantTs;
       const find=()=>{ for(const f of out) if(f.timestamp===wantTs) return f; return null; };
       let f=find(); if(f) return f;
       if(target<cursor-1 || target>cursor+300){       /* 되감기·큰 점프 → 키프레임부터 */
@@ -7358,17 +7365,27 @@ function makeVidDec(track, blob){
       }else if(cursor===0 && target>0){
         cursor=keyAt(target);
       }
-      let guard=0;
-      while(!dead && guard++<2000){
-        /* 요청을 기다리지 말고 미리 밀어 넣는다 — 디코더가 놀면 그만큼 느려진다 */
-        if(cursor<track.total && dec.decodeQueueSize<AHEAD) await feed(AHEAD-dec.decodeQueueSize);
-        f=find(); if(f) return f;
-        if(cursor>=track.total){                      /* 끝까지 먹였는데 아직 안 나옴 */
+      /* 예전엔 여기서 「한 틱 양보」를 정해진 횟수만큼 반복했는데, 그건 기다림이 아니라
+         헛돌기였다. 4K 처럼 한 장에 20ms 씩 걸리면 횟수를 다 태우고 옛 프레임을 집어 줬다
+         (실측: 4K 120프레임 중 41개만 정답). 이제 새 프레임이 나올 때까지 진짜로 기다린다. */
+      let idle=0;
+      while(!dead){
+        /* 미리 밀어 넣되, 손에 든 것 + 디코더 대기열이 깊이를 넘지 않게 한다 */
+        let room=DEPTH-(out.length+dec.decodeQueueSize);
+        /* 자리가 없는데 원하는 프레임은 손에 든 것들보다 뒤에 있다 →
+           가장 오래된 것을 버려 자리를 만든다. 안 그러면 서로를 기다리며 멈춘다. */
+        while(room<=0 && out.length>1 && out[out.length-1].timestamp<wantTs){
+          try{ out.shift().close(); }catch(e){}
+          room=DEPTH-(out.length+dec.decodeQueueSize);
+        }
+        if(cursor<track.total && room>0){ await feed(room); f=find(); if(f) return f; continue; }
+        if(cursor>=track.total && dec.decodeQueueSize===0){
           await dec.flush().catch(()=>{});
           f=find(); if(f) return f;
           break;
         }
-        await nudge();
+        if(await waitOutput(4000)){ idle=0; f=find(); if(f) return f; }
+        else if(++idle>=3) break;                     /* 4초씩 세 번 아무것도 안 나오면 포기 */
       }
       let best=null;                                  /* 못 찾으면 가장 가까운 이전 프레임 */
       for(const g of out) if(g.timestamp<=wantTs && (!best||g.timestamp>best.timestamp)) best=g;
@@ -7390,6 +7407,12 @@ async function attachVidDec(a){
     if(!('VideoDecoder' in window) || !a.blob) return null;
     const moov=await mp4ReadMoov(a.blob); if(!moov) return null;
     const tr=mp4VideoTrack(moov); if(!tr || !tr.total) return null;
+    /* 어느 쪽이 유리한지는 해상도가 가른다 — 같은 소스로 실측(→1080×1920@30 출력, 120프레임):
+         1080p30  <video> 1.69배속·고유 65 / 직접 디코딩 2.49배속·고유 120
+         4K30     <video> 1.10배속·고유 118 / 직접 디코딩 0.90배속·고유 120
+       4K 는 어차피 실시간 언저리라 <video> 도 배속을 안 올려서 프레임을 거의 안 흘린다.
+       그럴 땐 더 빠른 쪽을 쓴다. */
+    if(tr.W*tr.H > 2500000){ a.wcSkip='해상도'; return null; }
     const sup=await VideoDecoder.isConfigSupported({
       codec:tr.codec, codedWidth:tr.W, codedHeight:tr.H, description:tr.desc});
     if(!sup.supported) return null;
@@ -11184,7 +11207,8 @@ async function startExport(){
       const list=[]; eachVideoClip((c,tr,a)=>{ if(!seen.has(a)){ seen.add(a); list.push(a); } });
       for(const a of list){ all++; if(await attachVidDec(a)) wc++; }
       if(all) setStatus(`영상 소스 ${all}개 중 ${wc}개를 <b>직접 디코딩</b>으로 읽습니다`
-                        + (wc<all? ` (${all-wc}개는 기존 방식)`:'') + ' — 인코딩을 시작합니다…');
+                        + (wc<all? ` (${all-wc}개는 기존 방식 — 4K 급은 그쪽이 더 빠릅니다)`:'')
+                        + ' — 인코딩을 시작합니다…');
     }
     /* QMAX는 위에서 인코더 프로브와 같은 값으로 이미 정했다 */
 
