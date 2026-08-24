@@ -142,6 +142,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .track .tbtn{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:2px 8px}
 .track .tbtn.has{color:var(--amber);border-color:var(--amber)}
 .track .drag{cursor:grab;touch-action:none;font-size:14px;color:var(--dim);padding:3px 4px}
+.track .thumb{width:34px;height:22px;border-radius:4px;object-fit:cover;background:var(--panel);border:1px solid var(--line);flex:none}
+.track .nm{flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:60px}
+.track .dnum{width:46px;background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:11px;padding:2px 4px;outline:none;font-family:inherit}
+.track .dnum:focus{border-color:var(--rain)}
 .track-wrap.dragme .track{border-color:var(--mist);background:rgba(201,210,221,.06)}
 .subbox{display:none;margin:6px 0 2px 26px}
 .subbox.show{display:block}
@@ -326,6 +330,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="opt-label">플레이리스트 (오디오 1번 트랙 · 순차 배치)</div>
       <div class="tracklist" id="tracklist"></div>
       <div class="empty-note" id="emptyNote">아직 추가된 곡이 없습니다</div>
+
+      <div class="opt-label">영상 · 이미지 (영상 1번 트랙 · 순차 배치)</div>
+      <div class="tracklist" id="vislist"></div>
+      <div class="empty-note" id="visEmpty">아직 추가된 영상·이미지가 없습니다</div>
 
 
       <div class="opt-label">곡 사이 전환음</div>
@@ -3880,6 +3888,64 @@ function startDragReorder(e, idx){
   document.addEventListener('pointerup',up);
   document.addEventListener('pointercancel',up);
 }
+/* ───────── 영상·이미지 목록 (V1 트랙) ─────────
+   음원은 플레이리스트에 바로 보이는데 영상·이미지는 타임라인에만 들어가서,
+   패널에는 「아직 추가된 곡이 없습니다」만 남아 안 들어간 것처럼 보였다.
+   가져오는 즉시 여기에 뜨도록 목록을 따로 둔다. */
+function visTrack(){ return state.tracks.find(t=>t.kind==='video'); }
+function visClips(){ const tr=visTrack(); return tr? tr.clips.filter(c=>{ const a=A(c.assetId); return a&&(a.kind==='video'||a.kind==='image'); }) : []; }
+/* 배열 순서대로 앞에서부터 다시 붙인다 (순서 변경·길이 변경 후) */
+function visRepack(){
+  const tr=visTrack(); if(!tr) return;
+  let acc=0;
+  tr.clips.forEach(c=>{ c.start=acc; acc+=c.dur; });
+}
+function renderVisList(){
+  const list=$('vislist'); if(!list) return;
+  list.innerHTML='';
+  const tr=visTrack();
+  const cs=tr? tr.clips.slice() : [];
+  const vis=cs.filter(c=>{ const a=A(c.assetId); return a&&(a.kind==='video'||a.kind==='image'); });
+  $('visEmpty').style.display = vis.length? 'none':'block';
+  vis.forEach((c,i)=>{
+    const a=A(c.assetId); if(!a) return;
+    const isImg=a.kind==='image';
+    const row=document.createElement('div'); row.className='track';
+    const thumb = a.thumb ? `<img class="thumb" src="${a.thumb}" alt="">`
+                : isImg   ? `<img class="thumb" src="${(a.img&&a.img.src)||''}" alt="">`
+                          : `<span class="thumb"></span>`;
+    row.innerHTML=`<span class="idx">${String(i+1).padStart(2,'0')}</span>${thumb}
+      <span class="nm" title="${(a.name||'').replace(/"/g,'&quot;')}">${isImg?'🖼':'🎬'} ${a.name||''}</span>
+      ${isImg? `<input type="number" class="dnum" min="0.5" max="120" step="0.5" value="${c.dur.toFixed(1)}" title="표시 시간(초)">`
+             : `<span class="dur">${fmt(c.dur)}</span>`}
+      <button class="mv" title="위로">↑</button><button class="mv" title="아래로">↓</button>
+      <button class="rm" title="삭제">✕</button>`;
+    /* 클릭하면 타임라인에서 선택 */
+    row.addEventListener('click',e=>{
+      if(e.target.closest('button')||e.target.closest('input')) return;
+      state.sel=c.id; state.selSet=[]; renderTL(); propsRender(); drawNow();
+    });
+    if(isImg){
+      const dn=row.querySelector('.dnum');
+      dn.addEventListener('change',()=>{
+        pushUndo();
+        c.dur=clamp(+dn.value||5, .5, 120); dn.value=c.dur.toFixed(1);
+        visRepack(); renderAll();
+      });
+    }
+    const mv=row.querySelectorAll('.mv');
+    const idxIn=()=>tr.clips.indexOf(c);
+    mv[0].onclick=()=>{ const k=idxIn(); if(k<=0) return; pushUndo();
+      tr.clips.splice(k,1); tr.clips.splice(k-1,0,c); visRepack(); renderAll(); };
+    mv[1].onclick=()=>{ const k=idxIn(); if(k<0||k>=tr.clips.length-1) return; pushUndo();
+      tr.clips.splice(k,1); tr.clips.splice(k+1,0,c); visRepack(); renderAll(); };
+    row.querySelector('.rm').onclick=()=>{ pushUndo();
+      const k=idxIn(); if(k>=0) tr.clips.splice(k,1);
+      if(state.sel===c.id) state.sel=null;
+      visRepack(); renderAll(); };
+    list.appendChild(row);
+  });
+}
 function renderTracklist(){
   const list=$('tracklist'); list.innerHTML='';
   const cs=plClips();
@@ -4604,7 +4670,7 @@ $('splitBtn').onclick=splitSel; $('dupBtn').onclick=dupSel; $('delBtn').onclick=
 
 /* 전체 다시 그리기 */
 function renderAll(){
-  renderTL(); renderTracklist(); renderAssetList(); renderSubList(); propsRender();
+  renderTL(); renderTracklist(); renderVisList(); renderAssetList(); renderSubList(); propsRender();
   if(typeof renderBgPicker==='function') renderBgPicker();
   timeDisp(); drawNow();
 }
