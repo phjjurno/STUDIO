@@ -636,6 +636,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-wv="off">끄기</button>
         <button class="chip on" data-wv="bars">막대</button>
         <button class="chip" data-wv="mirror">미러 막대</button>
+        <button class="chip" data-wv="silk">🤍 실키 펄스</button>
         <button class="chip" data-wv="peaks">피크 캡</button>
         <button class="chip" data-wv="dots">도트 매트릭스</button>
         <button class="chip" data-wv="ribbon">리본</button>
@@ -3787,7 +3788,12 @@ function plTrack(){ return state.tracks.find(t=>t.pl) || state.tracks.find(t=>t.
 function plClips(){ const tr=plTrack(); return tr? sortedClips(tr) : []; }
 function plAppend(assetId){
   const tr=plTrack(); const a=A(assetId);
-  tr.clips.push(newClip(assetId, trackEndOf(tr), a.duration,
+  /* 전환음이 켜져 있으면 곡 앞에 효과음 길이만큼 빈자리를 두고 붙인다.
+     예전엔 빈자리 없이 끝에 바로 붙여서, 전환음을 먼저 켜고 곡을 넣으면
+     첫 곡이 0초에 시작했다. 전환음은 곡 시작 '앞'에 놓이므로 자리가 음수가 되고
+     (at+길이 <= 재생시작) 조건에 걸려 통째로 건너뛰어져 소리가 아예 안 났다.
+     곡이 하나뿐일 때는 전환음이 완전히 사라졌다. */
+  tr.clips.push(newClip(assetId, trackEndOf(tr)+tapeGap(), a.duration,
     {title:a.name, lyricsRaw:'', lyrics:[]}));
 }
 /* 전환음이 곡에 겹치지 않도록 곡 사이에 효과음 길이만큼 빈자리를 둔다.
@@ -5669,6 +5675,43 @@ function drawWaveCore(live){
     }
     g.shadowBlur=0;
     box=[CX-usable/2, base-maxH, usable, maxH+(mirror? maxH*.85: 0)];
+
+  }else if(state.wave==='silk'){
+    /* 가운데 축을 기준으로 위아래 대칭인 알약 막대.
+       막대마다 투명도를 달리해 어떤 건 또렷하고 어떤 건 안개처럼 남아 비단결 같은
+       깊이가 생기고, 양 끝은 점으로 잦아든다.
+       후광은 막대마다 그리면 블러 패스가 100번이라 느려서, 한 경로로 모아 한 번만 칠한다. */
+    const N=100;
+    const usable=w*.88*SW, unit=usable/N, bw=Math.max(1.5, unit*.34);
+    const x0=CX-usable/2+(unit-bw)/2;
+    const maxH=h*.19*SH;
+    const HH=new Array(N), AL=new Array(N);
+    for(let i=0;i<N;i++){
+      const p=i/(N-1);
+      const env=Math.pow(Math.sin(Math.PI*p), .8);       /* 양 끝으로 갈수록 잦아듦 */
+      const v=getAmp(i,N,live)*env;
+      HH[i]=Math.max(bw*.5, v*maxH);                     /* 최소 높이 = 지름 → 점이 된다 */
+      const n1=Math.sin(i*12.9898)*43758.5453;           /* 인덱스 기반 고정 난수 —
+                                                            프레임마다 깜빡이지 않는다 */
+      const r1=n1-Math.floor(n1);
+      /* 또렷한 막대와 안개처럼 흐린 막대를 섞는다 — 이 대비가 비단결 느낌을 만든다 */
+      AL[i]=(.26+.74*Math.pow(r1,1.15))*(.45+.55*env);
+    }
+    if(glowA){
+      g.save();
+      g.shadowColor=hexA(C,glowA*.9); g.shadowBlur=glowB*1.6;
+      g.fillStyle=hexA(C,.16);
+      g.beginPath();
+      for(let i=0;i<N;i++) roundRectPath(g,x0+i*unit,CY-HH[i],bw,HH[i]*2,bw/2);
+      g.fill();
+      g.restore();
+    }
+    g.shadowBlur=0;
+    for(let i=0;i<N;i++){
+      g.fillStyle=hexA(C, clamp(AL[i],0,1));
+      g.beginPath(); roundRectPath(g,x0+i*unit,CY-HH[i],bw,HH[i]*2,bw/2); g.fill();
+    }
+    box=[x0-bw, CY-maxH, usable, maxH*2];
 
   }else if(state.wave==='dots'){
     const cols=44, rows=13;
