@@ -3321,12 +3321,19 @@ function ensureCtx(){
   }
   if(actx.state==='suspended') actx.resume();
 }
-/* ───────── 배속 재생 피치 보정 ─────────
-   AudioBufferSourceNode 는 playbackRate 를 올리면 음정도 같이 올라간다(다람쥐 목소리).
-   유튜브처럼 속도만 올리고 음정은 그대로 두려면, 빨라진 만큼(1/R) 음정을 도로 내려야 한다.
-   믹스 버스 뒤에 그래뉼러 피치 시프터를 하나만 끼워 전체를 한 번에 보정한다 —
-   클립 스케줄(오프셋·페이드)은 손대지 않아 기존 동작이 그대로 유지된다.
-   내보내기는 항상 1배속이라 이 노드를 지나지 않는다. */
+/* ───────── 배속 재생 피치 보정 (WSOLA) ─────────
+   AudioBufferSourceNode 의 playbackRate 는 테이프를 빨리 감는 것과 같아 속도와 음정이
+   함께 움직인다. 유튜브처럼 속도만 올리려면 빨라진 만큼(1/R) 음정을 도로 내려야 한다.
+
+   WSOLA(Waveform Similarity Overlap-Add):
+   소리를 그레인(2048샘플) 단위로 잘라 겹쳐 붙이는데, 그냥 이어 붙이면 겹치는 두 조각의
+   파형 위상이 어긋나 빗살 간섭이 생기고 소리가 울렁거린다. 그래서 다음 그레인을 가져올
+   위치를 ±512샘플 범위에서 옮겨 보며 「직전 그레인 꼬리와 가장 닮은 지점」을 찾아 붙인다.
+   창은 한 그레인의 절반씩 겹치는 해닝 창이라 합이 정확히 1 — 창 때문에 생기는 음량
+   출렁임이 없다. 위치 보정(δ)은 누적하지 않아 입력·출력이 1:1 로 유지된다.
+
+   믹스 버스 뒤에 하나만 끼워 전체를 한 번에 보정한다. 클립 스케줄(오프셋·페이드)은
+   손대지 않으며, 1배속과 내보내기는 이 노드를 아예 지나지 않는다. */
 const PITCH_WORKLET_SRC = `
 class PitchFixProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors(){
@@ -3334,54 +3341,118 @@ class PitchFixProcessor extends AudioWorkletProcessor {
   }
   constructor(){
     super();
-    this.N = 2048;                        /* 그레인 길이 (약 43ms @48k) */
-    this.LEN = 8192; this.mask = this.LEN - 1;
-    this.buf = [new Float32Array(this.LEN), new Float32Array(this.LEN)];
-    this.w = 0; this.phase = 0;
+    this.L = 2048;                 /* 그레인 길이(출력 샘플) */
+    this.Hs = 1024;                /* 합성 홉 = 절반 겹침 */
+    this.DELTA = 512;              /* 유사도 탐색 범위(입력 샘플, 약 ±10ms) */
+    this.STRIDE = 4;               /* 탐색 간격 — 정확도는 유지하고 계산만 줄인다 */
+    this.RING = 32768; this.mask = this.RING - 1;
+    this.ORING = 8192; this.omask = this.ORING - 1;
+    this.inb = [new Float32Array(this.RING), new Float32Array(this.RING)];
+    this.ob  = [new Float32Array(this.ORING), new Float32Array(this.ORING)];
+    this.win = new Float32Array(this.L);
+    for(let i = 0; i < this.L; i++) this.win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / this.L);
+    this.tail = new Float32Array(this.Hs);
+    this.curShift = -1; this.needReset = true;
+    this.reset(1);
+  }
+  reset(s){
+    this.curShift = s; this.needReset = false;
+    this.inb[0].fill(0); this.inb[1].fill(0);
+    this.ob[0].fill(0);  this.ob[1].fill(0);
+    this.wpos = 0; this.rpos = 0; this.synthPos = 0;
+    this.oWrite = 0; this.oRead = 0; this.haveTail = false;
+  }
+  /* 직전 그레인 꼬리와 가장 닮은 시작점을 찾는다 (정규화 상호상관) */
+  search(s){
+    const Hs = this.Hs, D = this.DELTA, ST = this.STRIDE, mask = this.mask;
+    const b = this.inb[0], tail = this.tail;
+    let tailEn = 1e-12;
+    for(let i = 0; i < Hs; i += ST) tailEn += tail[i] * tail[i];
+    let best = -2, bestD = 0;
+    for(let d = -D; d <= D; d += ST){
+      const P = this.rpos + d;
+      if(P < 0) continue;
+      if(P + Hs * s + 2 > this.wpos) continue;
+      let num = 0, den = 1e-12;
+      for(let i = 0; i < Hs; i += ST){
+        const x = b[((P + i * s) | 0) & mask];
+        num += x * tail[i]; den += x * x;
+      }
+      const sc = num / Math.sqrt(den * tailEn);   /* -1~1 로 정규화 */
+      if(sc > best){ best = sc; bestD = d; }
+    }
+    /* 닮은 데가 없으면(잡음·타악처럼 주기성이 없는 소리) 억지로 맞추지 않는다 —
+       헛짚은 위치에 붙이면 오히려 음량이 출렁인다(실측 cv 0.033→0.089). */
+    return best < 0.3 ? 0 : bestD;
+  }
+  canMakeGrain(s){
+    return this.rpos + this.DELTA + this.L * s + 2 <= this.wpos;
+  }
+  makeGrain(s){
+    const L = this.L, Hs = this.Hs, mask = this.mask, omask = this.omask;
+    const P = this.rpos + (this.haveTail ? this.search(s) : 0);
+    /* 아직 아무도 안 쓴 뒷부분만 0 으로 비운다 (앞부분은 이전 그레인이 더해 둔 값) */
+    for(let i = Hs; i < L; i++){
+      const k = (this.synthPos + i) & omask;
+      this.ob[0][k] = 0; this.ob[1][k] = 0;
+    }
+    for(let ch = 0; ch < 2; ch++){
+      const b = this.inb[ch], o = this.ob[ch], w = this.win;
+      for(let i = 0; i < L; i++){
+        const f = P + i * s, i0 = Math.floor(f), fr = f - i0;
+        const a = b[i0 & mask], c = b[(i0 + 1) & mask];
+        o[(this.synthPos + i) & omask] += (a + (c - a) * fr) * w[i];
+      }
+    }
+    /* 다음 탐색의 기준이 될 꼬리 (창을 씌우지 않은 원파형) */
+    const b0 = this.inb[0];
+    for(let i = 0; i < Hs; i++){
+      const f = P + (Hs + i) * s, i0 = Math.floor(f), fr = f - i0;
+      const a = b0[i0 & mask], c = b0[(i0 + 1) & mask];
+      this.tail[i] = a + (c - a) * fr;
+    }
+    this.haveTail = true;
+    this.oWrite = this.synthPos + Hs;   /* 여기까지는 두 그레인이 다 더해져 완성됐다 */
+    this.synthPos += Hs;
+    this.rpos += Hs;                    /* δ 는 누적하지 않는다 — 입출력 1:1 유지 */
   }
   process(inputs, outputs, parameters){
     const inp = inputs[0], out = outputs[0];
     if(!out || out.length === 0) return true;
-    const n = out[0].length;
+    const n = out[0].length, nCh = out.length;
     const sp = parameters.shift;
     const s = sp.length > 0 ? sp[0] : 1;
     const inCh = (inp && inp.length) ? inp.length : 0;
     /* 1배속이면 그대로 흘려보낸다 */
     if(Math.abs(s - 1) < 1e-4){
-      for(let ch = 0; ch < out.length; ch++){
+      for(let ch = 0; ch < nCh; ch++){
         const src = inCh ? inp[Math.min(ch, inCh - 1)] : null;
         if(src) out[ch].set(src); else out[ch].fill(0);
       }
+      this.needReset = true;
       return true;
     }
-    const N = this.N, mask = this.mask, half = N * 0.5, step = 1 - s;
-    const chN = Math.min(2, out.length);
-    for(let ch = 0; ch < chN; ch++){
+    if(this.curShift !== s || this.needReset) this.reset(s);
+    /* ① 입력을 링버퍼에 쌓는다 */
+    for(let ch = 0; ch < 2; ch++){
       const src = inCh ? inp[Math.min(ch, inCh - 1)] : null;
-      const b = this.buf[ch], o = out[ch];
-      let w = this.w, ph = this.phase;
-      for(let i = 0; i < n; i++){
-        b[w] = src ? src[i] : 0;
-        /* 반 그레인 어긋난 두 지점을 삼각창으로 교차 — 되감기는 순간 소리가 0이라 끊김이 안 들린다 */
-        const d1 = ph, d2 = (ph + half) % N;
-        /* 등파워 교차 — 두 지점은 서로 다른 시점이라 위상이 무관하다.
-           선형으로 섞으면 겹치는 구간에서 음량이 3~4dB 꺼진다(실측 rms 0.212→0.127).
-           제곱근을 쓰면 g1²+g2²=1 이라 에너지가 유지된다. */
-        const t1 = 1 - Math.abs(2 * d1 / N - 1);
-        const t2 = 1 - Math.abs(2 * d2 / N - 1);
-        const g1 = Math.sqrt(t1), g2 = Math.sqrt(t2);
-        const f1 = w - d1, i0 = Math.floor(f1), r1 = f1 - i0;
-        const a1 = b[i0 & mask], c1 = b[(i0 + 1) & mask];
-        const f2 = w - d2, j0 = Math.floor(f2), r2 = f2 - j0;
-        const a2 = b[j0 & mask], c2 = b[(j0 + 1) & mask];
-        o[i] = g1 * (a1 + (c1 - a1) * r1) + g2 * (a2 + (c2 - a2) * r2);
-        w = (w + 1) & mask;
-        ph += step;
-        if(ph >= N) ph -= N; else if(ph < 0) ph += N;
-      }
-      if(ch === chN - 1){ this.w = w; this.phase = ph; }
+      const b = this.inb[ch], w = this.wpos;
+      for(let i = 0; i < n; i++) b[(w + i) & this.mask] = src ? src[i] : 0;
     }
-    for(let ch = chN; ch < out.length; ch++) out[ch].set(out[chN - 1]);
+    this.wpos += n;
+    /* ② 내보낼 만큼 그레인을 만든다 */
+    let guard = 0;
+    while(this.oWrite - this.oRead < n && this.canMakeGrain(s) && guard++ < 16) this.makeGrain(s);
+    /* ③ 완성된 만큼만 내보낸다 (모자라면 무음 — 시작 직후 준비 구간뿐) */
+    for(let ch = 0; ch < nCh; ch++){
+      const o = out[ch], b = this.ob[Math.min(ch, 1)];
+      let r = this.oRead;
+      for(let i = 0; i < n; i++){
+        if(r < this.oWrite){ o[i] = b[r & this.omask]; r++; }
+        else o[i] = 0;
+      }
+      if(ch === nCh - 1) this.oRead = r;
+    }
     return true;
   }
 }
