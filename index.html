@@ -10528,8 +10528,14 @@ function snapLayout(){
   o.exp={w:exp.w,h:exp.h,fps:exp.fps,scale:exp.scale};
   return o;
 }
+/* 복원도 최적화와 대칭으로 「자리 배치」만 되돌린다.
+   예전엔 백업을 통째로 덮어써서, 세로로 바꾼 뒤 켜고 끈 설정까지 되돌아갔다. */
 function applyLayout(o){
-  for(const k of SHORTS_KEYS) state[k]=JSON.parse(JSON.stringify(o[k]));
+  state.ratio=JSON.parse(JSON.stringify(o.ratio));
+  state.el=JSON.parse(JSON.stringify(o.el));
+  if(o.progressBar) Object.assign(state.progressBar,
+    {x:o.progressBar.x, y:o.progressBar.y, w:o.progressBar.w, h:o.progressBar.h});
+  if(o.subStyle && o.subStyle.y!=null) state.subStyle.y=o.subStyle.y;
   Object.assign(exp,o.exp);
   canvas.width=state.ratio.w; canvas.height=state.ratio.h;
   syncRatioChips(); syncUIFromState(); renderAll();
@@ -10538,36 +10544,61 @@ function syncRatioChips(){
   [...$('ratioRow').children].forEach(c=>c.classList.toggle('on',
     +c.dataset.w===state.ratio.w && +c.dataset.h===state.ratio.h));
 }
+/* 파형 자동 맞춤.
+   파형은 스타일마다 기준선이 제각각이다 — 막대·피크캡은 기준선에서 위로만 자라고,
+   미러는 위아래로, 스펙트럼은 또 다르다. 그래서 한 값으로는 34가지를 다 맞출 수 없고,
+   예전 값(y=0.50·sh=1.3)에서는 막대가 위로 16%까지 올라가 제목을 덮었다.
+   분류해서 값을 박아 넣는 대신, 실제로 한 번 그려서 차지하는 상자를 재고
+   그 상자가 제목과 자막 사이(32~66%)에 들어오도록 세로 위치·배율을 맞춘다.
+   상자는 진폭이 아니라 최대 높이로 계산되므로 조용한 구간에서 재도 결과가 같다. */
+function fitWaveToBand(){
+  if(state.wave==='off') return;
+  const TOP=.32, BOT=.66, BAND=BOT-TOP;
+  for(let pass=0; pass<3; pass++){
+    lastWaveBox=null;
+    try{ drawFrame(state.time||0,false); }catch(e){ return; }
+    const b=lastWaveBox; if(!b) return;
+    const H=canvas.height||1920;
+    const t=b[1]/H, bt=(b[1]+b[3])/H, hh=bt-t;
+    if(!(hh>0)) return;
+    if(hh>BAND+1e-4){                      /* 너무 크면 배율부터 줄이고 다시 잰다 */
+      state.el.wave.sh=Math.max(.3, state.el.wave.sh*(BAND/hh)*.98);
+      continue;
+    }
+    const mid=(t+bt)/2;                    /* 남는 자리에 가운데 맞춤 */
+    state.el.wave.y=clamp(state.el.wave.y+((TOP+BAND/2)-mid), .05, .95);
+    break;
+  }
+}
+/* 최적화는 「자리 배치」만 바꾼다.
+   예전엔 트랙 번호·비네트·그림자·진행바·글로우·제목 효과까지 켜 버려서,
+   일부러 꺼 둔 설정이 최적화를 누를 때마다 되살아났다(실측 8개 항목).
+   켜고 끔과 슬라이더로 정한 크기는 사용자 것이므로 손대지 않는다.
+   좌표는 항상 세로 기준 고정값이라 여러 번 눌러도 결과가 같다. */
 $('shOptimize').onclick=()=>{
   if(!shortsOn) shortsBackup=snapLayout();     /* 이미 세로면 원본을 덮어쓰지 않음 */
   shortsOn=true;
   state.ratio={w:1080,h:1920};
   canvas.width=1080; canvas.height=1920;
-  Object.assign(exp,{w:1080,h:1920,scale:1,fps:30});
+  Object.assign(exp,{w:1080,h:1920,scale:1,fps:exp.fps||30});
   /* ── 세로 안전영역 ──
-     상단 0~14%: 후킹 문구 자리 · 하단 82~100%: 쇼츠 UI(제목·프로필·버튼)가 가림 */
+     상단 0~16%: 후킹 문구 자리 · 하단 80~100%: 쇼츠 UI(제목·프로필·버튼)가 가림
+     그 사이(16~80%)에 트랙 번호 → 제목 → 파형 → 자막 → 진행바 순으로 겹치지 않게 쌓는다.
+     파형은 세로 1.15배(높이 약 30%)라 0.32~0.62 를 차지하고, 자막은 그 아래 0.70 이다.
+     예전 값(중심 0.50·세로 1.3배)은 아래끝이 0.669 라 자막(0.665)과 겹쳤다. */
   const lp=state.template==='lp';
-  state.el.title={x:.5, y:lp?.755:.30, custom:true};
-  state.el.label={x:.5, y:lp?.715:.245, custom:true};
-  state.el.lyrics={x:.5, y:.665, custom:true};
-  state.el.wave.x=.5;
-  state.el.wave.y=lp?.62:.50;
-  state.el.wave.sw=lp?.86:1.06;                 /* 세로에선 좌우로 꽉 차게 */
-  state.el.wave.sh=lp?1.0:1.3;                  /* 위아래로 시원하게 */
+  state.el.title={x:.5, y:lp?.755:.285, custom:true};
+  state.el.label={x:.5, y:lp?.715:.225, custom:true};
+  state.el.lyrics={x:.5, y:lp?.665:.70, custom:true};
+  Object.assign(state.el.wave,{x:.5, y:lp?.62:.50, sw:lp?.86:1.06, sh:lp?1.0:1.25});
   if(lp){ state.el.lp=state.el.lp||{x:.5,y:.5,scale:1};
           state.el.lp.x=.5; state.el.lp.y=.36; state.el.lp.scale=Math.min(state.el.lp.scale||1,.92); }
-  /* 눈에 확 들어오게 */
-  state.titleScale=Math.max(state.titleScale,1.3);
-  state.glow=Math.max(state.glow,1.5);
-  if(state.titleFx==='none') state.titleFx='glow';
-  state.shadowOn=true; state.vignette=true;
-  state.trackLabel.show=true;
-  state.subStyle.size=Math.max(state.subStyle.size,1.15);
-  state.subStyle.y=.665;
-  Object.assign(state.progressBar,{show:true, x:.5, y:.775, w:.82, h:.008,
-    showTime:true, showName:false});
+  state.subStyle.y=lp?.665:.70;
+  /* 진행바는 자리와 굵기만 — 표시 여부·시간·곡명은 사용자 설정 그대로 */
+  Object.assign(state.progressBar,{x:.5, y:.78, w:.84, h:.010});
+  if(!lp) fitWaveToBand();
   syncRatioChips(); syncUIFromState(); renderAll();
-  setStatus('📱 쇼츠 최적화 — 1080×1920 · 제목 확대·글로우 · 파형 확장 · 하단 UI 회피 배치');
+  setStatus('📱 쇼츠 최적화 — 1080×1920 · 제목·파형·자막·진행바를 세로 안전영역에 재배치 (켜고 끔·크기 설정은 그대로 둡니다)');
 };
 $('shRestore').onclick=()=>{
   if(shortsBackup){ applyLayout(shortsBackup); shortsOn=false;
@@ -10577,7 +10608,7 @@ $('shRestore').onclick=()=>{
     el:{wave:{x:.5,y:.74,sw:1,sh:1,panel:state.el.wave.panel??1,op:1,bright:1,con:1,shadow:0},
         title:{x:.5,y:0,custom:false}, label:{x:.5,y:0,custom:false},
         lyrics:{x:.5,y:.84,custom:false}, lp:{x:.5,y:.5,scale:1}},
-    titleScale:1, glow:state.glow, titleFx:state.titleFx,
+    titleScale:state.titleScale, glow:state.glow, titleFx:state.titleFx,
     shadowOn:state.shadowOn, vignette:state.vignette,
     progressBar:Object.assign({...state.progressBar},{x:.5,y:.88,w:.72,h:.025,showName:true}),
     subStyle:Object.assign({...state.subStyle},{y:.86}),
