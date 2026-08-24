@@ -540,6 +540,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       <div class="opt-label">추천 팔레트 (제목+파형 세트)</div>
       <div class="row" id="paletteRow"></div>
+      <div class="row" style="margin-top:6px;align-items:center">
+        <button class="chip" id="paletteRand">🎲 색 조합 랜덤</button>
+        <span class="hint2" style="margin:0">제목·파형 색을 어울리게 자동으로 뽑습니다</span>
+      </div>
       <div class="opt-label">배경이 밝거나 복잡할 때</div>
       <div class="sliders">
         <div class="slider"><label>글자 불투명도 <span class="slider-rhs"><b id="titleOpV" style="display:none">100%</b><input type="number" class="snum" id="titleOpN" min="20" max="100" value="100"><small class="usuf">%</small></span></label>
@@ -667,6 +671,14 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <input type="range" id="waveSH" min="30" max="220" value="100"></div>
         <div class="slider"><label>다이내믹 <small style="color:var(--dim)">(최고·최저 차이)</small> <span class="slider-rhs"><b id="waveDynV" style="display:none">45%</b><input type="number" class="snum" id="waveDynN" min="0" max="100" value="45"><small class="usuf">%</small></span></label>
           <input type="range" id="waveDyn" min="0" max="100" value="45"></div>
+        <div class="slider"><label>파형 밝기 <span class="slider-rhs"><b id="waveBrV" style="display:none">100%</b><input type="number" class="snum" id="waveBrN" min="20" max="220" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="waveBr" min="20" max="220" value="100"></div>
+        <div class="slider"><label>파형 대비 <span class="slider-rhs"><b id="waveCoV" style="display:none">100%</b><input type="number" class="snum" id="waveCoN" min="20" max="220" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="waveCo" min="20" max="220" value="100"></div>
+        <div class="slider"><label>파형 투명도 <span class="slider-rhs"><b id="waveOpV" style="display:none">100%</b><input type="number" class="snum" id="waveOpN" min="10" max="100" value="100"><small class="usuf">%</small></span></label>
+          <input type="range" id="waveOp" min="10" max="100" value="100"></div>
+        <div class="slider"><label>뒤 배경 그림자 <small style="color:var(--dim)">(어두운 색 파형용)</small> <span class="slider-rhs"><b id="waveSdV" style="display:none">0%</b><input type="number" class="snum" id="waveSdN" min="0" max="100" value="0"><small class="usuf">%</small></span></label>
+          <input type="range" id="waveSd" min="0" max="100" value="0"></div>
         <div class="slider"><label>패널·종이 투명도 <small style="color:var(--dim)">(VU·스코프·질감)</small> <span class="slider-rhs"><b id="wavePanelV" style="display:none">100%</b><input type="number" class="snum" id="wavePanelN" min="0" max="100" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="wavePanel" min="0" max="100" value="100"></div>
       </div>
@@ -3062,7 +3074,7 @@ const state = {
   bg:{type:'gradient', idx:0, img:null, scale:1, ox:0, oy:0, dark:.45, bright:1, con:1},
   motion:'zoom', motionInt:1, ambient:'none', ambInt:.6, wave:'bars',
   logo:{img:null, file:null, show:false, x:.09, y:.12, scale:1, opacity:1, bright:1, con:1},
-  el:{ wave:{x:.5,y:.74,sw:1,sh:1,panel:1}, title:{x:.5,y:0,custom:false},
+  el:{ wave:{x:.5,y:.74,sw:1,sh:1,panel:1,op:1,bright:1,con:1,shadow:0}, title:{x:.5,y:0,custom:false},
        label:{x:.5,y:0,custom:false}, lyrics:{x:.5,y:.84,custom:false},
        lp:{x:.5,y:.5,scale:1,opacity:1,bright:1,con:1} },
   template:'none', lpTonearm:true, lpSideTitle:false,
@@ -5491,8 +5503,51 @@ function drawAmbient(){
   g.restore();
 }
 
+function hexLum(hex){
+  const t=String(hex||'').replace('#','');
+  if(t.length<6) return 1;
+  const r=parseInt(t.slice(0,2),16)/255, g=parseInt(t.slice(2,4),16)/255, b=parseInt(t.slice(4,6),16)/255;
+  return .2126*r+.7152*g+.0722*b;
+}
 /* ───────── 파형 ───────── */
+/* 파형 뒤에 깔리는 부드러운 그림자.
+   어두운 색 파형은 배경에 묻혀 안 보였는데, 파형 색의 밝기를 보고 반대쪽 색
+   (밝은 파형 → 검은 그림자 / 어두운 파형 → 흰 그림자)을 깔아 준다.
+   모든 파형 스타일에 공통으로 먹히도록 파형 자체가 아니라 영역에 그린다.
+   영역은 직전 프레임에서 잰 값을 쓴다 — 파형 상자는 프레임마다 거의 그대로다. */
+let lastWaveBox=null;
+function drawWaveScrim(bd, op){
+  const {g,w,h}=R, wv=state.el.wave;
+  let bx,by,bw,bh;
+  if(lastWaveBox){ bx=lastWaveBox[0]; by=lastWaveBox[1]; bw=lastWaveBox[2]; bh=lastWaveBox[3]; }
+  else { bw=w*.86*(wv.sw||1); bh=h*.34*(wv.sh||1); bx=wv.x*w-bw/2; by=wv.y*h-bh/2; }
+  if(!(bw>1&&bh>1)) return;
+  const cx=bx+bw/2, cy=by+bh/2, rx=bw*.72, ry=bh*.95;
+  const col = hexLum(state.waveColor)>.5 ? '0,0,0' : '255,255,255';
+  g.save();
+  g.globalAlpha=clamp(op,0,1);
+  g.translate(cx,cy); g.scale(rx,ry);
+  const grd=g.createRadialGradient(0,0,0,0,0,1);
+  grd.addColorStop(0,   `rgba(${col},${(.60*bd).toFixed(3)})`);
+  grd.addColorStop(.55, `rgba(${col},${(.30*bd).toFixed(3)})`);
+  grd.addColorStop(1,   `rgba(${col},0)`);
+  g.fillStyle=grd;
+  g.beginPath(); g.arc(0,0,1,0,Math.PI*2); g.fill();
+  g.restore();
+}
 function drawWave(live){
+  const wv=state.el.wave, {g}=R;
+  const op=clamp(wv.op!=null?wv.op:1,0,1);
+  const br=wv.bright!=null?wv.bright:1, co=wv.con!=null?wv.con:1;
+  const bd=clamp(wv.shadow!=null?wv.shadow:0,0,1);
+  if(bd>.002) drawWaveScrim(bd, op);
+  g.save();
+  if(op<1) g.globalAlpha*=op;
+  if(br!==1||co!==1){ try{ g.filter=`brightness(${br}) contrast(${co})`; }catch(e){} }
+  drawWaveCore(live);
+  g.restore();
+}
+function drawWaveCore(live){
   updateAGC(live);
   const {g,w,h}=R, m=Math.min(w,h), T=R.T||0;
   const C=state.waveColor, wv=state.el.wave;
@@ -6640,6 +6695,7 @@ function drawWave(live){
     box=[CX-tw/2, CY-maxH-fs*.8, tw, maxH*2+fs*1.6];
   }
   g.restore();
+  lastWaveBox=box;
   if(R.preview&&box) HIT.push({id:'wave', x:box[0], y:box[1], w:box[2], h:box[3]});
 }
 
@@ -10518,7 +10574,7 @@ $('shRestore').onclick=()=>{
     setStatus('최적화 이전 가로 배치로 되돌렸습니다.'); return; }
   /* 백업이 없어도(새로고침 등) 가로 기본값으로 복구 */
   applyLayout({ratio:{w:1920,h:1080},
-    el:{wave:{x:.5,y:.74,sw:1,sh:1,panel:state.el.wave.panel??1},
+    el:{wave:{x:.5,y:.74,sw:1,sh:1,panel:state.el.wave.panel??1,op:1,bright:1,con:1,shadow:0},
         title:{x:.5,y:0,custom:false}, label:{x:.5,y:0,custom:false},
         lyrics:{x:.5,y:.84,custom:false}, lp:{x:.5,y:.5,scale:1}},
     titleScale:1, glow:state.glow, titleFx:state.titleFx,
@@ -10965,6 +11021,10 @@ bindSlider('waveSW','waveSWV',v=>state.el.wave.sw=v/100);
 bindSlider('waveSH','waveSHV',v=>state.el.wave.sh=v/100);
 bindSlider('waveDyn','waveDynV',v=>state.waveDyn=v/100);
 bindSlider('wavePanel','wavePanelV',v=>state.el.wave.panel=v/100);
+bindSlider('waveBr','waveBrV',v=>state.el.wave.bright=v/100);
+bindSlider('waveCo','waveCoV',v=>state.el.wave.con=v/100);
+bindSlider('waveOp','waveOpV',v=>state.el.wave.op=v/100);
+bindSlider('waveSd','waveSdV',v=>state.el.wave.shadow=v/100);
 bindSlider('titleSize','titleSizeV',v=>state.titleScale=v/100);
 /* 진행 바 슬라이더 */
 bindSlider('pbX','pbXV',v=>state.progressBar.x=v/100);
@@ -11003,25 +11063,19 @@ function syncTitleHue(){
   [...row.children].forEach(c=>c.classList.toggle('on', c.dataset.hue.toUpperCase()===cur));
 }
 $('waveColor').addEventListener('input',e=>{ state.waveColor=e.target.value; drawNow(); });
+/* 추천 팔레트 — [이름, 제목 색(밝은 톤), 파형 색(진한 톤)].
+   어두운 파형도 「뒤 배경 그림자」로 살릴 수 있게 되어 깊은 색도 함께 넣었다. */
 const PALETTES=[
-  ['퓨어 화이트','#FFFFFF','#FFFFFF'], ['실버','#E9EDF3','#C6CFDA'], ['문라이트','#DFE6F0','#A8B6CC'],
-  ['그라파이트 펄','#D6DAE0','#9AA2AE'], ['샴페인 골드','#F4E4BC','#E5C377'], ['골드 러시','#F7DFA0','#DFAE4F'],
-  ['앰버','#F5D9A8','#E09B3D'], ['로즈','#F6D3C8','#E5A18F'], ['코랄 선셋','#FBD0BC','#F08C5F'],
-  ['피치','#FADFCB','#F0B48C'], ['아이스 블루','#DEF0FA','#9BCEEC'], ['스카이','#D3E9FA','#7FB8E8'],
-  ['오션','#C5E4EE','#5FA8C4'], ['라벤더','#E5DAF6','#BEA7E7'], ['바이올렛 네온','#E4D0FA','#A86FF0'],
-  ['오키드','#F2D6EE','#D48CC8'], ['민트','#D6F4E6','#7FE3BC'], ['에메랄드','#C8EEDD','#4FC996'],
-  ['라임 소다','#E8F6C8','#B8E05F'], ['선셋 핑크','#FBD3E0','#F078A8'], ['마이애미','#FBD3F0','#6FE0E8'],
-  ['신스웨이브','#E0C8FA','#5FDDE8'], ['시티 앰버','#F5DFC0','#E8A85C'], ['레트로 크림','#F5EEDD','#D8C8A8'],
-  ['체리 네온','#FAC8D0','#F05F78'], ['스틸 블루','#D5DEE8','#7F94AC'], ['세이지','#E0EAD8','#A8C094'],
-  /* ── LA · 웨스트코스트 무드 ── */
-  ['선셋 블러바드','#FFE0B8','#FF7A45'], ['베니스 비치','#FFF0D4','#F2B441'],
-  ['말리부','#DFF3F7','#3FB6C9'], ['팜 스프링스','#FFE3D0','#F2705B'],
-  ['할리우드 골드','#F8ECC8','#C9A227'], ['미드나잇 LA','#C9D4E8','#4A5C86'],
-  ['네온 느와르','#EBD9FF','#7A3FF2'], ['바이스 시티','#FFD6F0','#FF3FA4'],
-  ['데저트 로즈','#F6DCD6','#C46B5C'], ['스모그 선셋','#FFDCC0','#E0603C'],
-  ['콘크리트','#E4E6E9','#8B9096'], ['티파니','#D8F5EE','#3FD0B0'],
-  ['건메탈','#CFD4DA','#5A626C'], ['일렉트릭 라임','#EEFFD0','#A3E635'],
-  ['블러드 오렌지','#FFDCC8','#FF5A2B'], ['아이스 민트','#E6FBF4','#6EE7C8'],
+  ['흑요석','#E9EAEE','#262A33'],      ['먹빛 남색','#DCE4F5','#1F3A6E'],
+  ['자정 숲','#D8EDE2','#14503C'],      ['와인 셀러','#F3DCE2','#6E1B33'],
+  ['자수정','#E7DAF7','#5B2E9B'],       ['청록 유약','#D5F0EC','#0E7C7B'],
+  ['구리 주전자','#F7E2CE','#A85A22'],   ['겨자씨','#FAEDC4','#C8961B'],
+  ['벽돌 골목','#F6DED5','#9E4A34'],     ['이끼 정원','#E4EFD6','#5F7A33'],
+  ['라구나','#D6ECFA','#1E7FC2'],        ['산호초','#FFDDD6','#E4573D'],
+  ['라일락 안개','#EDE3F6','#9B7FC7'],   ['세피아 필름','#F2E7D6','#8A6A45'],
+  ['스모키 로즈','#F5E0E4','#B36A7E'],   ['빙하 균열','#DDF2F8','#4FA9C9'],
+  ['형광 청록','#D6FBF2','#00D3A7'],     ['전기 자홍','#FCDCF2','#E02FA0'],
+  ['사프란','#FFE9C7','#F09A1E'],        ['심해 블루','#D3E0F0','#14335E'],
 ];
 {
   const pr=$('paletteRow');
@@ -11036,6 +11090,37 @@ const PALETTES=[
     $('titleColor').value=b.dataset.t; $('waveColor').value=b.dataset.w;
     drawNow();
   });
+  /* 색 조합 랜덤 — 같은 계열 안에서 제목은 밝게, 파형은 진하게 뽑아 늘 어울리게 만든다 */
+  const hsl2hex=(h,sa,l)=>{
+    h=((h%360)+360)%360; sa/=100; l/=100;
+    const c=(1-Math.abs(2*l-1))*sa, x=c*(1-Math.abs((h/60)%2-1)), m=l-c/2;
+    let r=0,g=0,b2=0;
+    if(h<60){r=c;g=x;} else if(h<120){r=x;g=c;} else if(h<180){g=c;b2=x;}
+    else if(h<240){g=x;b2=c;} else if(h<300){r=x;b2=c;} else {r=c;b2=x;}
+    const f=v=>Math.round((v+m)*255).toString(16).padStart(2,'0').toUpperCase();
+    return '#'+f(r)+f(g)+f(b2);
+  };
+  $('paletteRand').onclick=()=>{
+    const h=Math.floor(Math.random()*360);
+    const dark=Math.random()<.28;                       /* 가끔 깊은 색도 뽑는다 */
+    const wave = dark ? hsl2hex(h, 45+Math.random()*35, 20+Math.random()*12)
+                      : hsl2hex(h, 55+Math.random()*35, 42+Math.random()*18);
+    const title= hsl2hex(h+(Math.random()*30-15), 22+Math.random()*28, 88+Math.random()*6);
+    [...pr.children].forEach(c=>c.classList.remove('on'));
+    state.titleColor=title; state.waveColor=wave;
+    $('titleColor').value=title; $('waveColor').value=wave;
+    let note='';
+    /* 어두운 파형은 그냥 두면 배경에 묻힌다 — 그림자가 꺼져 있으면 같이 켜 준다 */
+    if(hexLum(wave)<.35 && (state.el.wave.shadow||0)<.05){
+      state.el.wave.shadow=.45;
+      const r=$('waveSd'), n=$('waveSdN'), v=$('waveSdV');
+      if(r) r.value=45; if(n) n.value=45; if(v) v.textContent='45%';
+      note=' · 어두운 색이라 「뒤 배경 그림자」를 45%로 함께 켰습니다';
+    }
+    if(typeof syncTitleHue==='function') syncTitleHue();
+    drawNow();
+    setStatus(`색 조합 — 제목 ${title} · 파형 ${wave}${note}`);
+  };
 }
 $('fxRow').addEventListener('click',e=>{
   const b=e.target.closest('.chip'); if(!b) return;
@@ -11734,6 +11819,8 @@ function applySettings(s){
 }
 function syncUIFromState(){
   const pick=(rowId,fn)=>[...$(rowId).children].forEach(c=>c.classList.toggle('on',fn(c)));
+  /* 선언보다 먼저 쓰이던 자리가 있어 여기서 멈췄었다(파형 슬라이더 동기화가 통째로 안 됨) */
+  const setS=(id,vid,val,suf='%')=>{ $(id).value=val; $(vid).textContent=val+suf; const n=$(id+'N'); if(n) n.value=val; };
   pick('ratioRow',c=>+c.dataset.w===state.ratio.w&&+c.dataset.h===state.ratio.h);
   canvas.width=state.ratio.w; canvas.height=state.ratio.h;
   pick('motionRow',c=>c.dataset.mo===state.motion);
@@ -11769,7 +11856,6 @@ function syncUIFromState(){
     c.classList.toggle('on', state.bg.type==='gradient'&&+c.dataset.g===state.bg.idx));
   $('bgImageBtn').classList.toggle('on', state.bg.type==='image');
   $('bgControls').classList.toggle('show', state.bg.type==='image');
-  const setS=(id,vid,val,suf='%')=>{ $(id).value=val; $(vid).textContent=val+suf; const n=$(id+'N'); if(n) n.value=val; };
   setS('bgScale','bgScaleV',Math.round(state.bg.scale*100));
   setS('bgDark','bgDarkV',Math.round(state.bg.dark*100));
   setS('bgBri','bgBriV',Math.round((state.bg.bright||1)*100));
@@ -11797,6 +11883,10 @@ function syncUIFromState(){
   setS('lvY','lvYV',Math.round((LV.y??.5)*100));
   if(typeof syncLyricUI==='function') syncLyricUI();
   setS('wavePanel','wavePanelV',Math.round((state.el.wave.panel!=null?state.el.wave.panel:1)*100));
+  setS('waveBr','waveBrV',Math.round((state.el.wave.bright!=null?state.el.wave.bright:1)*100));
+  setS('waveCo','waveCoV',Math.round((state.el.wave.con!=null?state.el.wave.con:1)*100));
+  setS('waveOp','waveOpV',Math.round((state.el.wave.op!=null?state.el.wave.op:1)*100));
+  setS('waveSd','waveSdV',Math.round((state.el.wave.shadow!=null?state.el.wave.shadow:0)*100));
   setS('lpScale','lpScaleV',Math.round((state.el.lp?state.el.lp.scale||1:1)*100));
   setS('lpX','lpXV',Math.round((state.el.lp&&state.el.lp.x!=null?state.el.lp.x:.5)*100));
   setS('lpY','lpYV',Math.round((state.el.lp&&state.el.lp.y!=null?state.el.lp.y:.5)*100));
