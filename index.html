@@ -183,7 +183,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #subProg b{color:var(--amber)}
 
 /* ── 타임라인 ── */
-#tl{flex:0 0 auto;height:250px;border-top:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:120px}
+#tl{flex:0 0 auto;height:250px;border-top:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:120px;position:relative}
+#tl.filedrop{outline:2px dashed var(--amber);outline-offset:-4px;background:rgba(227,181,100,.05)}
+#tlDropHint{position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:40;pointer-events:none;display:none;background:rgba(18,20,24,.92);border:1px solid var(--amber);color:var(--amber);border-radius:99px;padding:5px 14px;font-size:12px;white-space:nowrap}
+#tl.filedrop #tlDropHint{display:block}
 #tlBar{display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--line);flex:0 0 auto;flex-wrap:wrap}
 #tlBar button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--mist);font-size:12px;padding:4px 10px;cursor:pointer;font-family:inherit}
 #tlBar button:hover{border-color:var(--mist)}
@@ -1066,6 +1069,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 </div>
 
 <div id="tl">
+  <div id="tlDropHint">여기에 놓으면 그 자리에 들어갑니다</div>
   <div id="tlBar">
     <button id="undoBtn" title="실행 취소 (Ctrl+Z)">↩ 취소</button>
     <button id="redoBtn" title="다시 실행 (Ctrl+Y)">↪ 재실행</button>
@@ -3654,37 +3658,47 @@ drop.addEventListener('click',async()=>{
 fileInput.addEventListener('change',e=>importFiles(e.target.files));
 ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
-drop.addEventListener('drop',async e=>{
-  /* 중요: DataTransfer 는 이벤트 핸들러가 처음 await 하는 순간 브라우저가 비워버린다.
-     그래서 파일/핸들 접근은 반드시 await 전에 「동기적으로」 모두 붙잡아 둬야 한다.
-     예전엔 루프 안에서 하나씩 await 해서 여러 개를 끌어와도 첫 파일만 들어갔다. */
-  const items=[...(e.dataTransfer.items||[])];
-  const plainFiles=[...(e.dataTransfer.files||[])];   /* 폴백: 동기 캡처 */
+/* 드래그로 떨어뜨린 파일 모으기.
+   중요: DataTransfer 는 핸들러가 처음 await 하는 순간 브라우저가 비워버린다.
+   그래서 파일/핸들 접근은 반드시 await 전에 「동기적으로」 모두 붙잡아 둬야 한다.
+   (예전엔 루프 안에서 하나씩 await 해서 여러 개를 끌어와도 첫 파일만 들어갔다) */
+function grabDropFiles(dt){
+  const items=[...(dt.items||[])];
+  const plain=[...(dt.files||[])];
   if(CAN_LINK && items.length && items[0].getAsFileSystemHandle){
-    /* getAsFileSystemHandle() 는 프로미스를 즉시 반환한다 — 동기 루프로 전부 호출해 둔다 */
-    const handleProms=items.map(it=> it.kind==='file' && it.getAsFileSystemHandle ? it.getAsFileSystemHandle() : null);
-    const files=[];
-    for(let i=0;i<handleProms.length;i++){
-      const hp=handleProms[i];
-      if(hp){
-        try{ const h=await hp;
-          if(h && h.kind==='file'){ const f=await h.getFile(); f.__fh=h; files.push(f); continue; } }catch(err){}
+    /* getAsFileSystemHandle() 는 프로미스를 즉시 돌려준다 — 동기 루프로 전부 호출해 둔다 */
+    const proms=items.map(it=> it.kind==='file' && it.getAsFileSystemHandle ? it.getAsFileSystemHandle() : null);
+    return (async()=>{
+      const files=[];
+      for(let i=0;i<proms.length;i++){
+        const hp=proms[i];
+        if(hp){ try{ const h=await hp;
+          if(h && h.kind==='file'){ const f=await h.getFile(); f.__fh=h; files.push(f); continue; } }catch(err){} }
+        if(plain[i]) files.push(plain[i]);            /* 핸들 실패 시 같은 순번의 File */
       }
-      if(plainFiles[i]) files.push(plainFiles[i]);      /* 핸들 실패 시 같은 순번의 File */
-    }
-    if(files.length){ importFiles(files); return; }
+      return files.length? files : plain;
+    })();
   }
-  if(plainFiles.length) importFiles(plainFiles);
+  return Promise.resolve(plain);
+}
+const dtHasFiles=dt=>!!dt && [...(dt.types||[])].includes('Files');
+drop.addEventListener('drop',async e=>{
+  if(!dtHasFiles(e.dataTransfer)) return;
+  const files=await grabDropFiles(e.dataTransfer);
+  if(files.length) importFiles(files);
 });
 
 const isAudioFile=f=>f.type.startsWith('audio/')||/\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name);
 const isVideoFile=f=>f.type.startsWith('video/')||/\.(mp4|webm|mov)$/i.test(f.name);
 const isImageFile=f=>f.type.startsWith('image/')||/\.(png|jpe?g|webp|gif)$/i.test(f.name);
 
-async function importFiles(fileList){
+/* 타임라인에 떨어뜨린 시각 — 있으면 영상·이미지를 그 자리에 놓는다(없으면 끝에 붙임) */
+let importAt=null;
+async function importFiles(fileList, atTime){
   ensureCtx();
   const files=[...fileList];
   if(!files.length) return;
+  importAt=(typeof atTime==='number' && isFinite(atTime))? Math.max(0,atTime) : null;
   pushUndo();
   setStatus('미디어를 읽는 중…');
   for(const f of files){
@@ -3695,6 +3709,7 @@ async function importFiles(fileList){
       else setStatus(`「${f.name}」 — 지원하지 않는 형식이라 건너뛰었습니다.`);
     }catch(err){ console.warn(err); setStatus(`「${f.name}」 은 읽을 수 없어 건너뛰었습니다.`); }
   }
+  importAt=null;
   fileInput.value='';
   renderAll();
   setStatus(`총 길이 ${fmt(tlDuration())} — 타임라인에서 클립을 편집하세요.`);
@@ -3730,7 +3745,9 @@ async function importVideo(f){
   /* 오디오 트랙 디코드 (실패 시 무음) */
   try{ a.audioBuffer=await actx.decodeAudioData(await f.arrayBuffer()); }catch(e){ a.audioBuffer=null; }
   const vt=firstVideoTrack();
-  vt.clips.push(newClip(id, trackEndOf(vt), a.duration));
+  const at=importAt!=null? importAt : trackEndOf(vt);
+  vt.clips.push(newClip(id, at, a.duration));
+  if(importAt!=null) importAt+=a.duration;      /* 여러 개면 이어서 놓는다 */
 }
 async function importImage(f){
   const img=new Image();
@@ -3739,7 +3756,9 @@ async function importImage(f){
   state.assets.set(id,{id,kind:'image',name:cleanTitle(f.name),blob:f,duration:0,
     width:img.naturalWidth,height:img.naturalHeight,img});
   const vt=firstVideoTrack();
-  vt.clips.push(newClip(id, trackEndOf(vt), 5));
+  const at=importAt!=null? importAt : trackEndOf(vt);
+  vt.clips.push(newClip(id, at, 5));
+  if(importAt!=null) importAt+=5;
 }
 /* rVFC(requestVideoFrameCallback)로 '실제 표시된 프레임'을 기다려 봤지만,
    내보내기 중에는 영상 요소가 화면에 붙어 있지 않아 콜백이 오지 않는다.
@@ -4092,6 +4111,39 @@ function xOf(t){ return HEADW + t*state.pxs; }
 function laneT(clientX){
   const r=tlInner.getBoundingClientRect();
   return (clientX - r.left - HEADW)/state.pxs;
+}
+/* 타임라인에 바로 끌어다 놓기 — 떨어뜨린 자리에 영상·이미지가 들어간다.
+   예전엔 왼쪽 패널의 드롭 영역에서만 받아서, 작업창으로 가져가면 아무 일도 없었다.
+   클립을 옮기는 내부 드래그는 포인터 이벤트라 dataTransfer 에 파일이 없다 —
+   'Files' 가 들어 있을 때만 반응해 서로 간섭하지 않는다. */
+{
+  const tlEl=$('tl');
+  if(tlEl){
+    let depth=0;
+    const over=()=>{ tlEl.classList.add('filedrop'); };
+    const off =()=>{ depth=0; tlEl.classList.remove('filedrop'); };
+    tlEl.addEventListener('dragenter',e=>{
+      if(!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault(); depth++; over();
+    });
+    tlEl.addEventListener('dragover',e=>{
+      if(!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      try{ e.dataTransfer.dropEffect='copy'; }catch(err){}
+      over();
+      const t=Math.max(0, laneT(e.clientX));
+      const hint=$('tlDropHint');
+      if(hint) hint.textContent=`여기에 놓으면 ${fmt(t)} 자리에 들어갑니다`;
+    });
+    tlEl.addEventListener('dragleave',e=>{ if(--depth<=0) off(); });
+    tlEl.addEventListener('drop',async e=>{
+      if(!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault(); off();
+      const at=Math.max(0, laneT(e.clientX));
+      const files=await grabDropFiles(e.dataTransfer);   /* await 전에 동기 캡처됨 */
+      if(files.length) importFiles(files, at);
+    });
+  }
 }
 function drawRuler(durS){
   const ruler=$('tlRuler');
