@@ -10098,6 +10098,20 @@ function spreadLyrics(lines, inS, srcDur){
     text }));
 }
 /* 한글이 실린 줄인지 — 원문/번역 짝을 가려낼 때 쓴다 */
+/* 이 줄이 라틴 문자 위주인지 — 한글·가나·한자 같은 다른 글자 체계와 구별한다.
+   원문/번역은 '글자 체계가 다르다'는 게 핵심이라 한글만 보지 않고 넓게 판단한다.
+   글자가 하나도 없으면(숫자·기호뿐) 판단하지 않고 null 을 돌려준다. */
+function latinLine(s){
+  const L=String(s||'').match(/\p{L}/gu)||[];
+  if(!L.length) return null;
+  const lat=L.filter(ch=>/[A-Za-z\u00C0-\u024F]/.test(ch)).length;
+  return lat/L.length > .5;
+}
+/* 두 줄이 서로 다른 글자 체계인가 (원문·번역 한 쌍의 조건) */
+function diffScript(a,b){
+  const x=latinLine(a), y=latinLine(b);
+  return x!==null && y!==null && x!==y;
+}
 function isKoLine(s){
   const t=String(s||'').replace(/\s/g,'');
   if(!t) return false;
@@ -10141,10 +10155,20 @@ function parseLRC(text){
     const prev=merged[merged.length-1];
     /* 같은 시각이거나, 0.4초 안쪽이면서 한쪽만 한글이면 원문·번역 한 쌍으로 본다.
        번역 줄에 0.01~0.1초쯤 밀린 타임코드가 붙어 오는 파일이 흔하다. */
-    const near = prev && Math.abs(it.s-prev.s)<.02;
-    const pair = prev && Math.abs(it.s-prev.s)<.4 && isKoLine(it.text)!==isKoLine(prev.text);
-    if(prev && !prev.text2 && it.text!==prev.text && (near||pair)){
+    /* 원문·번역 한 쌍은 「시각이 겹치면서 글자 체계가 다를 때」만이다.
+       예전엔 시각만 같으면 언어를 안 보고 뒷줄을 번역 칸에 넣어서, 영어만 있는
+       가사인데도 같은 시각에 두 줄이 오면 뒷줄이 번역으로 읽혔다(실측 재현). */
+    const dl = prev && diffScript(it.text, prev.text);
+    const sameTime = prev && Math.abs(it.s-prev.s)<.02;
+    const pair = prev && Math.abs(it.s-prev.s)<.4 && dl;
+    if(prev && !prev.text2 && it.text!==prev.text && pair){
       prev.text2=it.text;
+      if(it.untimed && !prev.untimed) prev.untimed=it.untimed;
+    }
+    else if(prev && sameTime && !dl && it.text!==prev.text){
+      /* 같은 언어가 같은 시각에 온 것 — 한 자막이 두 줄로 적힌 경우다.
+         따로 두면 길이 0짜리가 겹쳐 깜빡이므로 줄바꿈으로 이어 붙인다. */
+      prev.text += '\n' + it.text;
       if(it.untimed && !prev.untimed) prev.untimed=it.untimed;
     }
     else merged.push(it);
@@ -10155,7 +10179,7 @@ function parseLRC(text){
       /* 한 줄에 「원문 / 번역」이 같이 든 형식 — 한쪽만 한글일 때만 가른다
          (24/7 처럼 뜻이 있는 슬래시를 잘못 자르지 않도록) */
       const m=it.text.match(/^(.+?)\s*(?:\/\/|[|/｜·])\s*(.+)$/);
-      if(m && isKoLine(m[1])!==isKoLine(m[2])){ it.text=m[1].trim(); it.text2=m[2].trim(); }
+      if(m && diffScript(m[1], m[2])){ it.text=m[1].trim(); it.text2=m[2].trim(); }
     }
     delete it.untimed;
   }
