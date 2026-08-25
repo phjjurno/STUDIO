@@ -7938,6 +7938,10 @@ const VID_FIX_TOL=.017;
      상한 12 → 2.07배속 · 68~83종      ← 여기서부터 정확도가 무너진다
    정확도는 5~10 구간에서 사실상 같고 속도만 차이 나므로 8로 되돌린다. */
 const VID_RATE_MAX=8;
+/* 처져 있을 때 소스를 최소 이만큼은 돌린다 — 느린 속도에 갇히지 않게 하는 복원력 */
+const VID_RATE_MIN=2;
+/* 이만큼 앞서 있으면 굳이 밀지 않는다 (대기가 0이라 이미 빠른 상태) */
+const VID_AHEAD_KEEP=.03;
 /* 내보내기가 실제로 소모하는 속도(소스 초/실시간 초)를 추정해 재생 배속을 맞춘다.
    잔여 오차만 보고 배속을 정하면 거의 따라잡았을 때 배속이 0.5까지 떨어져
    정작 필요한 처리량에 못 미친다(실측 평균 0.81배 → 4K60이 0.53배속). */
@@ -8029,7 +8033,18 @@ async function advanceVideosTo(t){
     /* 앞세우는 여유를 두면(1.08 로 시험) 다시 앞질러 탐색이 늘었다 —
        0.34배속·최악 412ms 가 0.29배속·최악 895ms 로 나빠졌다. 여유 없이 딱 맞춘다. */
     const corr=1+clamp(drift,-.4,.4)*3;     /* 처짐(+) → 당기고, 앞섬(-) → 늦춘다 */
-    v.playbackRate=clamp(pace*need*corr, .1, VID_RATE_MAX);
+    /* ⚠ 배속을 '지금 나오는 속도(pace)'로만 정하면 어떤 속도든 그대로 굳는다.
+       소스를 pace 로 돌리면 한 프레임 기다리는 데 (1/fps)/pace 초가 걸리고,
+       그 대기가 다시 pace 를 그 값에 묶어 놓기 때문이다 — 어느 속도든 자기 자신과
+       맞아떨어지는 고정점이 된다. 그래서 맥이 잠깐 바빠 한 번 처지면, 부하가
+       사라진 뒤에도 스스로 못 올라온다.
+       실측(FHD, 초반 25프레임만 60ms 지연을 준 뒤 부하 제거):
+         부하 중 0.67배 → 해제 직후 0.60배(그대로) → 60~120f 1.06배 → 120f~ 3.39배
+         전체 0.54배속. 부하는 방아쇠일 뿐 회복을 못 하는 게 진짜 문제였다.
+       그래서 '앞서 있지 않을 때'는 pace 대신 최소 기준으로 밀어 준다.
+       앞서 있으면 예전대로 pace·corr 로 늦추므로 앞질러 달아나지 않는다. */
+    const base=(drift > -VID_AHEAD_KEEP)? Math.max(pace, VID_RATE_MIN) : pace;
+    v.playbackRate=clamp(base*need*corr, .1, VID_RATE_MAX);
     if(v.paused){ const pr=v.play();      /* 순차 디코딩 재생. AbortError(탐색이 play를 끊음)는 정상이라 무시 */
       if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(e=>{ if(e&&e.name!=='AbortError') a.noPlay=true; }); }
     /* 타임아웃되면 그냥 이전 프레임을 쓰고 넘어갔었다 — 소스가 못 따라오는 구간마다
