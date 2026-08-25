@@ -9458,11 +9458,56 @@ function drawSubs(t){
 
 /* 호버 표시 */
 let hoverId=null, cvDrag=null;
+/* ── 스마트 가이드(PPT 방식) ──
+   끄는 동안 화면 한가운데와 다른 요소의 중심·좌우/상하 끝에 맞으면 쫙 붙는다.
+   위치는 매번 마우스 좌표에서 새로 계산하므로, 조금만 벗어나면 저절로 풀려
+   계속 자유롭게 끌 수 있다(붙어서 안 움직이는 일이 없다).
+   Alt(⌥)를 누른 채 끌면 잠시 꺼진다. */
+let snapGuides=[];
+function cvSnap(ax, ay, D, disabled){
+  snapGuides=[];
+  if(disabled) return {x:ax, y:ay};
+  const W=canvas.width, H=canvas.height;
+  const TOL=Math.max(4, W*.006);
+  const cx=ax+D.cx, cy=ay+D.cy;              /* 지금 상자의 중심 */
+  const vx=[W/2], hy=[H/2];                  /* 화면 한가운데를 먼저 — 동점이면 가운데 우선 */
+  for(const b of HIT){
+    if(b.id===D.id) continue;
+    vx.push(b.x+b.w/2, b.x, b.x+b.w);
+    hy.push(b.y+b.h/2, b.y, b.y+b.h);
+  }
+  const mine=[0, -D.hw, D.hw];               /* 내 상자의 중심·왼끝·오른끝(위·아래끝) */
+  let bx=null, by=null;
+  for(const m of mine) for(const v of vx){
+    const want=v-m, d=Math.abs(want-cx);
+    if(d<=TOL && (!bx || d<bx.d)) bx={d, c:want, line:v};
+  }
+  for(const m of [0,-D.hh,D.hh]) for(const v of hy){
+    const want=v-m, d=Math.abs(want-cy);
+    if(d<=TOL && (!by || d<by.d)) by={d, c:want, line:v};
+  }
+  if(bx){ ax+=bx.c-cx; snapGuides.push({x:bx.line}); }
+  if(by){ ay+=by.c-cy; snapGuides.push({y:by.line}); }
+  return {x:ax, y:ay};
+}
 function drawHover(){
+  const {g,w,h}=R;
+  if(cvDrag && snapGuides.length){          /* 붙은 기준선을 보여 준다 */
+    g.save();
+    g.strokeStyle='rgba(227,181,100,.95)';
+    g.lineWidth=Math.max(1,w*.0012);
+    g.setLineDash([w*.006,w*.004]);
+    for(const s2 of snapGuides){
+      g.beginPath();
+      if(s2.x!=null){ g.moveTo(s2.x,0); g.lineTo(s2.x,h); }
+      else { g.moveTo(0,s2.y); g.lineTo(w,s2.y); }
+      g.stroke();
+    }
+    g.restore();
+  }
   if(!hoverId&&!cvDrag) return;
   const id=cvDrag? cvDrag.id : hoverId;
   const hb=HIT.find(b=>b.id===id); if(!hb) return;
-  const {g,w}=R;
   g.save();
   g.strokeStyle='rgba(159,193,224,.8)'; g.lineWidth=Math.max(1.5,w*.0015);
   g.setLineDash([w*.008,w*.006]);
@@ -9503,7 +9548,10 @@ canvas.addEventListener('pointerdown',e=>{
   else if(hb.id==='label'){ const el2=state.el.label;
     ax=(el2.custom? el2.x*canvas.width : titleAnchor().x); ay=hb.y+hb.h*.55; }
   else { const el2=state.el[hb.id]; ax=el2.x*canvas.width; ay=el2.y*canvas.height; }
-  cvDrag={id:hb.id, ox:ax-p.x, oy:ay-p.y};
+  /* 앵커가 상자 중심이 아닌 요소(파형처럼 기준선이 아래인 것)도 있어
+     상자 기준으로 맞추려고 앵커→중심 차이와 반크기를 같이 담아 둔다 */
+  cvDrag={id:hb.id, ox:ax-p.x, oy:ay-p.y,
+          cx:(hb.x+hb.w/2)-ax, cy:(hb.y+hb.h/2)-ay, hw:hb.w/2, hh:hb.h/2};
   canvas.style.cursor='grabbing';
 });
 canvas.addEventListener('pointermove',e=>{
@@ -9511,8 +9559,9 @@ canvas.addEventListener('pointermove',e=>{
   const p=toCanvasPos(e);
   if(cvDrag){
     e.preventDefault();
-    const nx=clamp((p.x+cvDrag.ox)/canvas.width,.02,.98);
-    const ny=clamp((p.y+cvDrag.oy)/canvas.height,.02,.98);
+    const sp=cvSnap(p.x+cvDrag.ox, p.y+cvDrag.oy, cvDrag, e.altKey);
+    const nx=clamp(sp.x/canvas.width,.02,.98);
+    const ny=clamp(sp.y/canvas.height,.02,.98);
     if(cvDrag.id==='subs'){ state.subStyle.x=nx; state.subStyle.y=ny; syncSubStyleUI(); }
     else if(cvDrag.id==='progbar'){ state.progressBar.x=nx; state.progressBar.y=ny; syncPbSliders(); }
     else if(cvDrag.id==='logo'){ state.logo.x=nx; state.logo.y=ny; }
@@ -9533,7 +9582,7 @@ canvas.addEventListener('pointermove',e=>{
   const nh=hb? hb.id : null;
   if(nh!==hoverId){ hoverId=nh; canvas.style.cursor=nh? 'grab':'default'; drawFrame(state.time,false); }
 });
-const endCvDrag=()=>{ if(cvDrag){ cvDrag=null; canvas.style.cursor=hoverId?'grab':'default'; drawNow(); propsRender(); } };
+const endCvDrag=()=>{ if(cvDrag){ cvDrag=null; snapGuides=[]; canvas.style.cursor=hoverId?'grab':'default'; drawNow(); propsRender(); } };
 canvas.addEventListener('pointerup',endCvDrag);
 canvas.addEventListener('pointercancel',endCvDrag);
 function syncWaveSliders(){
