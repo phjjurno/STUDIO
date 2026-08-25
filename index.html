@@ -7724,8 +7724,14 @@ function makeVidDec(track, blob){
                   while(out.length>1 && out[0].timestamp<lastWant) try{out.shift().close();}catch(e){}
                   /* 방금 건네준 프레임은 절대 닫지 않는다 — 화면에 그려지기 전에 닫히면
                      그 프레임만 안 그려져서 영상이 깜빡인다. */
-                  while(out.length>DEPTH+2 && out[0].timestamp!==lastWant)
-                    try{out.shift().close();}catch(e){}
+                  /* 건네준 프레임은 건너뛰고 그 다음 것부터 버린다.
+                     예전엔 맨 앞이 건네준 프레임이면 가지치기를 통째로 멈춰서
+                     버퍼가 무한정 불어났고, 자리가 없어 더 못 먹이는 교착이 났다. */
+                  while(out.length>DEPTH+2){
+                    let i=0; while(i<out.length && out[i].timestamp===lastWant) i++;
+                    if(i>=out.length) break;
+                    try{ out.splice(i,1)[0].close(); }catch(e){}
+                  }
                   wake(); },
       error:e=>{ err=e; dead=true; }
     });
@@ -7755,14 +7761,25 @@ function makeVidDec(track, blob){
       cursor++;
     }
   };
+  let slow=0;
   return {
     get dead(){ return dead; },
     get error(){ return err; },
+    get tooSlow(){ return slow>=3; },
     /* 표시 시각 t 의 프레임. 시각이 정확히 일치하는 프레임만 돌려준다 —
        「t 이하 아무거나」로 두면 아직 안 나온 사이에 옛 프레임을 집어 준다(실측 7개 중 1개만 정답). */
     async frameAt(t){
       if(dead) return null;
       if(!dec) mk();
+      const t0=performance.now();
+      try{ return await this._at(t); }
+      finally{
+        /* 한 장에 200ms 넘게 걸리는 일이 이어지면 뭔가 잘못된 것이다.
+           그럴 땐 이 소스를 예전 방식으로 넘겨 최소한 느려지지는 않게 한다. */
+        if(performance.now()-t0>200) slow++; else slow=0;
+      }
+    },
+    async _at(t){
       const target=idxAt(t);
       const wantTs=Math.round(track.cts[target]*1e6);
       lastWant=wantTs;
@@ -7782,10 +7799,12 @@ function makeVidDec(track, blob){
       while(!dead){
         /* 미리 밀어 넣되, 손에 든 것 + 디코더 대기열이 깊이를 넘지 않게 한다 */
         let room=DEPTH-(out.length+dec.decodeQueueSize);
-        /* 자리가 없는데 원하는 프레임은 손에 든 것들보다 뒤에 있다 →
-           가장 오래된 것을 버려 자리를 만든다. 안 그러면 서로를 기다리며 멈춘다. */
-        while(room<=0 && out.length>1 && out[out.length-1].timestamp<wantTs){
-          try{ out.shift().close(); }catch(e){}
+        /* 자리가 없는데 원하는 프레임도 없다 → 원하는 것만 빼고 가장 오래된 것을 버려
+           자리를 만든다. 안 그러면 서로를 기다리며 멈춘다(실측 0.1배속). */
+        while(room<=0 && !find() && out.length>0){
+          let i=0; while(i<out.length && out[i].timestamp===wantTs) i++;
+          if(i>=out.length) break;
+          try{ out.splice(i,1)[0].close(); }catch(e){}
           room=DEPTH-(out.length+dec.decodeQueueSize);
         }
         if(cursor<track.total && room>0){ await feed(room); f=find(); if(f) return f; continue; }
@@ -7852,6 +7871,8 @@ async function verifyVidDec(a, dec, track){
   }catch(e){ return false; }
   return true;
 }
+/* 파일을 직접 뜯어 디코딩하는 경로. 실제 작업물에서 문제가 반복돼 꺼 둔 상태다. */
+const WC_ON=false;
 /* 소스에 디코더를 붙인다 — 안 되는 파일이면 조용히 예전 방식으로 남는다 */
 async function attachVidDec(a){
   if(a.wcDec && !a.wcDec.dead) return a.wcDec;
@@ -7870,6 +7891,11 @@ async function attachVidDec(a){
        엉뚱한 프레임이 나온다는 보고가 있었다. 편집 목록(elst)이 붙은 파일은
        0초가 매체 시각 0이 아니라서 통째로 어긋나는데, 이 파서는 elst 를 안 읽는다.
        원인을 실제 파일로 확인하고 고치기 전까지는 예전 <video> 경로만 쓴다. */
+    /* ⚠ 기본은 꺼 둔다.
+       합성 테스트 영상으로는 5.8배속·프레임 완벽이지만, 실제 작업물에서 세 번 연속
+       탈이 났다(엉뚱한 프레임 → 깜빡임 → 0.1배속). 셋 다 여기서는 재현되지 않아
+       원인을 못 짚었다. 실제 파일로 재현하기 전까지는 예전 <video> 경로만 쓴다. */
+    if(!WC_ON){ a.wcSkip='꺼짐'; return null; }
     /* 4K 급은 <video> 쪽이 더 빠르고 어차피 프레임을 거의 안 흘린다 (실측
        4K30: <video> 1.10배속·고유 118/120 · 직접 디코딩 0.90배속·고유 120/120). */
     if(tr.W*tr.H > 2500000){ a.wcSkip='해상도'; return null; }
@@ -7954,8 +7980,10 @@ async function advanceVideosTo(t){
       /* 프레임을 못 받으면 그 자리에 옛 그림이 얼어붙는다 — 그럴 땐 이 소스만
          남은 구간 내내 예전 <video> 방식으로 돌린다. */
       waits.push(a.wcDec.frameAt(st).then(f=>{
-        if(f) a.wcFrame=f;
-        else { a.wcDec=null; a.wcFrame=null; }
+        if(!f || a.wcDec.tooSlow){        /* 못 받거나 느려지면 이 소스는 예전 방식으로 */
+          try{ a.wcDec.close(); }catch(e){}
+          a.wcDec=null; a.wcFrame=null;
+        }else a.wcFrame=f;
       }).catch(()=>{ a.wcDec=null; a.wcFrame=null; }));
       continue;
     }
@@ -11914,6 +11942,8 @@ async function startExport(){
       if(fadeOut>0 && ot>outDur-fadeOut) f=Math.min(f,(outDur-ot)/fadeOut);
       return clamp(f,0,1); };
     let audioTs=0, fNext=0;
+    /* 느릴 때 어디서 시간이 가는지 바로 보이게 — 인코더 대기 / 영상 소스 / 그리기 */
+    let tmWait=0, tmVid=0, tmDraw=0, tmN=0;
     for(let segS=0; segS<outDur && !state.cancelRender && !encErr; segS+=SEG){
       const segE=Math.min(outDur, segS+SEG);
       const from=Math.max(0, exStart+segS-pad), to=Math.min(dur, exStart+segE+pad), span=to-from;
@@ -11950,20 +11980,31 @@ async function startExport(){
         const bw0=performance.now();
         while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && performance.now()-bw0<10000)
           await encWait(vEnc);
+        const bw1=performance.now(); tmWait+=bw1-bw0;
         if(vidP) await vidP;
+        const bw2=performance.now(); tmVid+=bw2-bw1;
         computeSpectrum(specSrc, clamp(t-from, 0, span-.02));
         drawFrame(t, true, rg, W, H, false);
+        tmDraw+=performance.now()-bw2;
         if(fadeIn>0||fadeOut>0){ const bf=1-fadeF(ot);   /* 화면 검정 페이드 */
           if(bf>0){ rg.save(); rg.globalAlpha=Math.min(1,bf); rg.fillStyle='#000'; rg.fillRect(0,0,W,H); rg.restore(); } }
         const vf=new VideoFrame(rcanvas,{timestamp:Math.round(fNext*1e6/FPS),duration:Math.round(1e6/FPS)});
         vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
+        tmN++;
         if(fNext%15===0){
           const pct=fNext/totalFrames, spd=(fNext/FPS)/((performance.now()-t0)/1000);
           const eta=spd>0?(outDur-fNext/FPS)/spd:0;
           $('progressFill').style.width=(pct*100)+'%';
+          /* 실시간보다 느리면 프레임당 어디에 시간이 갔는지 함께 보여 준다 */
+          let why='';
+          if(spd<1.5 && tmN){
+            const w=(tmWait/tmN).toFixed(1), v=(tmVid/tmN).toFixed(1), d=(tmDraw/tmN).toFixed(1);
+            why=` · 프레임당 인코더 ${w}ms · 영상 ${v}ms · 그리기 ${d}ms`;
+          }
+          tmWait=tmVid=tmDraw=0; tmN=0;
           setStatus(`<span class="rec">⚡ 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
             +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}`
-            +(encoderPickNote? ` · ${encoderPickNote}`:'')+`</span>`);
+            +(encoderPickNote? ` · ${encoderPickNote}`:'')+why+`</span>`);
           if(stash){ await stash.spill(); await stash.maybeFlush(); }
           await yieldTask();
         }
