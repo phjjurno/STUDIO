@@ -9457,13 +9457,48 @@ function drawSubs(t){
 }
 
 /* 호버 표시 */
-let hoverId=null, cvDrag=null;
+let hoverId=null, cvDrag=null, cvSize=null;
 /* ── 스마트 가이드(PPT 방식) ──
    끄는 동안 화면 한가운데와 다른 요소의 중심·좌우/상하 끝에 맞으면 쫙 붙는다.
    위치는 매번 마우스 좌표에서 새로 계산하므로, 조금만 벗어나면 저절로 풀려
    계속 자유롭게 끌 수 있다(붙어서 안 움직이는 일이 없다).
    Alt(⌥)를 누른 채 끌면 잠시 꺼진다. */
 let snapGuides=[];
+/* ── 끌어서 크기 조절 ──
+   제목은 한 값(제목 크기)뿐이라 비율 그대로 커지고,
+   파형은 가로·세로가 따로 있어 모서리는 둘 다, 변은 한쪽만 바꾼다.
+   슬라이더 범위와 같은 값으로 묶어 둬야 조절 뒤 슬라이더와 어긋나지 않는다. */
+const setSlider=(id,vid,val)=>{ const r=$(id),n=$(id+'N'),b=$(vid);
+  if(r) r.value=val; if(n) n.value=val; if(b) b.textContent=val+'%'; };
+const RESIZE={
+  title:{ uniform:true,
+    get:()=>state.titleScale,
+    set:v=>{ state.titleScale=clamp(v,.5,1.7);
+             setSlider('titleSize','titleSizeV',Math.round(state.titleScale*100)); } },
+  wave:{ uniform:false,
+    getW:()=>state.el.wave.sw, setW:v=>state.el.wave.sw=clamp(v,.3,2.2),
+    getH:()=>state.el.wave.sh, setH:v=>state.el.wave.sh=clamp(v,.3,2.2),
+    after:()=>{ setSlider('waveSW','waveSWV',Math.round(state.el.wave.sw*100));
+                setSlider('waveSH','waveSHV',Math.round(state.el.wave.sh*100)); } },
+};
+function handleList(hb,spec){
+  const L=hb.x, Rt=hb.x+hb.w, T=hb.y, B=hb.y+hb.h;
+  const MX=hb.x+hb.w/2, MY=hb.y+hb.h/2;
+  const out=[{k:'nw',x:L,y:T},{k:'ne',x:Rt,y:T},{k:'sw',x:L,y:B},{k:'se',x:Rt,y:B}];
+  if(!spec.uniform) out.push({k:'w',x:L,y:MY},{k:'e',x:Rt,y:MY},{k:'n',x:MX,y:T},{k:'s',x:MX,y:B});
+  return out;
+}
+const handleR=()=>Math.max(7, canvas.width*.008);
+function handleAt(p,id){
+  const spec=RESIZE[id]; if(!spec) return null;
+  const hb=HIT.find(b=>b.id===id); if(!hb) return null;
+  const r=handleR()*1.5;
+  for(const h of handleList(hb,spec))
+    if(Math.abs(p.x-h.x)<=r && Math.abs(p.y-h.y)<=r) return h.k;
+  return null;
+}
+const CURSOR={nw:'nwse-resize',se:'nwse-resize',ne:'nesw-resize',sw:'nesw-resize',
+              w:'ew-resize',e:'ew-resize',n:'ns-resize',s:'ns-resize'};
 function cvSnap(ax, ay, D, disabled){
   snapGuides=[];
   if(disabled) return {x:ax, y:ay};
@@ -9505,13 +9540,26 @@ function drawHover(){
     }
     g.restore();
   }
-  if(!hoverId&&!cvDrag) return;
-  const id=cvDrag? cvDrag.id : hoverId;
+  if(!hoverId&&!cvDrag&&!cvSize) return;
+  const id=cvSize? cvSize.id : cvDrag? cvDrag.id : hoverId;
   const hb=HIT.find(b=>b.id===id); if(!hb) return;
   g.save();
   g.strokeStyle='rgba(159,193,224,.8)'; g.lineWidth=Math.max(1.5,w*.0015);
   g.setLineDash([w*.008,w*.006]);
   roundRect(g,hb.x,hb.y,hb.w,hb.h,w*.006); g.stroke();
+  /* 크기 조절 손잡이 — 끄는 중에는 옮기는 쪽만 남긴다 */
+  const spec=RESIZE[id];
+  if(spec && !cvDrag){
+    g.setLineDash([]);
+    const s2=handleR();
+    for(const hd of handleList(hb,spec)){
+      g.beginPath(); g.rect(hd.x-s2/2, hd.y-s2/2, s2, s2);
+      g.fillStyle= (cvSize&&cvSize.k===hd.k)? 'rgba(227,181,100,1)' : 'rgba(18,20,24,.9)';
+      g.fill();
+      g.strokeStyle='rgba(227,181,100,.95)'; g.lineWidth=Math.max(1.2,w*.0011);
+      g.stroke();
+    }
+  }
   g.restore();
 }
 
@@ -9529,7 +9577,24 @@ function hitAt(p){
 }
 canvas.addEventListener('pointerdown',e=>{
   if(state.playing||state.rendering) return;
-  const p=toCanvasPos(e), hb=hitAt(p);
+  const p=toCanvasPos(e);
+  /* ① 손잡이를 잡았으면 크기 조절 */
+  if(hoverId && RESIZE[hoverId]){
+    const k=handleAt(p,hoverId);
+    if(k){
+      e.preventDefault(); canvas.setPointerCapture(e.pointerId);
+      markUndo();
+      const box=HIT.find(b=>b.id===hoverId), spec=RESIZE[hoverId];
+      const cx=box.x+box.w/2, cy=box.y+box.h/2;
+      cvSize={ id:hoverId, k, spec, cx, cy,
+               d0x:Math.max(1,Math.abs(p.x-cx)), d0y:Math.max(1,Math.abs(p.y-cy)),
+               s0:spec.uniform? spec.get() : 0,
+               w0:spec.uniform? 0 : spec.getW(), h0:spec.uniform? 0 : spec.getH() };
+      canvas.style.cursor=CURSOR[k]||'nwse-resize';
+      return;
+    }
+  }
+  const hb=hitAt(p);
   if(!hb) return;
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
@@ -9557,6 +9622,23 @@ canvas.addEventListener('pointerdown',e=>{
 canvas.addEventListener('pointermove',e=>{
   if(state.playing||state.rendering) return;
   const p=toCanvasPos(e);
+  if(cvSize){
+    e.preventDefault();
+    const S=cvSize, sp=S.spec;
+    const dx=Math.abs(p.x-S.cx), dy=Math.abs(p.y-S.cy);
+    const near1=v=>Math.abs(v-1)<.04? 1 : v;      /* 100% 근처면 딱 맞춰 준다 */
+    if(sp.uniform){
+      const f = S.k.length===2 ? Math.hypot(dx,dy)/Math.hypot(S.d0x,S.d0y)
+              : (S.k==='w'||S.k==='e') ? dx/S.d0x : dy/S.d0y;
+      sp.set(near1(S.s0*f));
+    }else{
+      if(S.k!=='n'&&S.k!=='s') sp.setW(near1(S.w0*(dx/S.d0x)));
+      if(S.k!=='w'&&S.k!=='e') sp.setH(near1(S.h0*(dy/S.d0y)));
+      if(sp.after) sp.after();
+    }
+    drawFrame(state.time,false);
+    return;
+  }
   if(cvDrag){
     e.preventDefault();
     const sp=cvSnap(p.x+cvDrag.ox, p.y+cvDrag.oy, cvDrag, e.altKey);
@@ -9579,10 +9661,16 @@ canvas.addEventListener('pointermove',e=>{
     return;
   }
   const hb=hitAt(p);
-  const nh=hb? hb.id : null;
-  if(nh!==hoverId){ hoverId=nh; canvas.style.cursor=nh? 'grab':'default'; drawFrame(state.time,false); }
+  let nh=hb? hb.id : null;
+  /* 손잡이는 상자 밖 모서리에 걸쳐 있다 — 근처에 있으면 선택을 놓지 않는다 */
+  let hk=null;
+  if(hoverId && RESIZE[hoverId]){ hk=handleAt(p,hoverId); if(hk) nh=hoverId; }
+  if(nh!==hoverId){ hoverId=nh; drawFrame(state.time,false); }
+  canvas.style.cursor = hk? (CURSOR[hk]||'nwse-resize') : nh? 'grab' : 'default';
 });
-const endCvDrag=()=>{ if(cvDrag){ cvDrag=null; snapGuides=[]; canvas.style.cursor=hoverId?'grab':'default'; drawNow(); propsRender(); } };
+const endCvDrag=()=>{
+  if(cvSize){ cvSize=null; canvas.style.cursor=hoverId?'grab':'default'; drawNow(); propsRender(); }
+  if(cvDrag){ cvDrag=null; snapGuides=[]; canvas.style.cursor=hoverId?'grab':'default'; drawNow(); propsRender(); } };
 canvas.addEventListener('pointerup',endCvDrag);
 canvas.addEventListener('pointercancel',endCvDrag);
 function syncWaveSliders(){
