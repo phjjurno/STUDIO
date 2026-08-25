@@ -3779,7 +3779,9 @@ function nextPresentedFrame(v, ms){
     try{ v.requestVideoFrameCallback(()=>fin()); }catch(e){ fin(); }
   });
 }
+let vidSeeks=0;                       /* 내보내기 중 되감기 탐색 횟수 (진단용) */
 function seekVideo(v,t){
+  vidSeeks++;
   return withTimeout(new Promise(res=>{
     const h=()=>{ v.removeEventListener('seeked',h); res(); };
     v.addEventListener('seeked',h); v.currentTime=Math.max(0,t);
@@ -7883,6 +7885,7 @@ async function attachVidDec(a){
   }
   if(a.wcSkip) return null;            /* 한 번 걸러진 파일은 다시 시도하지 않는다 */
   if(a.wcTried) return null;
+  if(!WC_ON){ a.wcSkip='꺼짐'; return null; }   /* 꺼져 있으면 파일을 읽지도 않는다 */
   a.wcTried=true;
   try{
     if(!('VideoDecoder' in window) || !a.blob) return null;
@@ -7897,7 +7900,6 @@ async function attachVidDec(a){
        합성 테스트 영상으로는 5.8배속·프레임 완벽이지만, 실제 작업물에서 세 번 연속
        탈이 났다(엉뚱한 프레임 → 깜빡임 → 0.1배속). 셋 다 여기서는 재현되지 않아
        원인을 못 짚었다. 실제 파일로 재현하기 전까지는 예전 <video> 경로만 쓴다. */
-    if(!WC_ON){ a.wcSkip='꺼짐'; return null; }
     /* 4K 급은 <video> 쪽이 더 빠르고 어차피 프레임을 거의 안 흘린다 (실측
        4K30: <video> 1.10배속·고유 118/120 · 직접 디코딩 0.90배속·고유 120/120). */
     if(tr.W*tr.H > 2500000){ a.wcSkip='해상도'; return null; }
@@ -11828,6 +11830,30 @@ async function startExport(){
   const outDur=exEnd-exStart;
   const fadeIn=clamp(exp.fadeIn||0, 0, outDur/2);
   const fadeOut=clamp(exp.fadeOut||0, 0, outDur/2);
+  /* 저장 위치를 제일 먼저 묻는다.
+     인코더 탐색(4K 는 여섯 조합을 실제로 돌려 본다) 뒤로 밀면 그 사이에 클릭 권한이
+     풀려서 showSaveFilePicker 가 SecurityError 로 막히고, 대화상자 없이 조용히
+     메모리 방식으로 넘어간다 — 「저장 폴더 고르는 게 사라졌다」가 이것이었다. */
+  let fileWritable=null;
+  if(batchMode && batchDir){
+    try{
+      const nm=exportNameOverride || `export_${W}x${H}.mp4`;
+      const fh=await batchDir.getFileHandle(nm,{create:true});
+      fileWritable=await fh.createWritable();
+    }catch(err){ console.error('batch dir write',err);
+      setStatus('고른 폴더에 쓸 수 없어 다운로드 폴더로 저장합니다.'); }
+  }else if(window.showSaveFilePicker && !batchMode){
+    try{
+      const handle=await showSaveFilePicker({
+        suggestedName:`export_${W}x${H}_${new Date().toISOString().slice(0,10)}.mp4`,
+        types:[{description:'MP4 동영상',accept:{'video/mp4':['.mp4']}}]
+      });
+      fileWritable=await handle.createWritable();
+    }catch(e){
+      if(e.name==='AbortError'){ setStatus('저장 위치 선택을 취소했습니다 — 메모리 방식으로 인코딩합니다…'); }
+      else setStatus('저장 위치 창을 열지 못해 메모리 방식으로 인코딩합니다 — 끝나면 다운로드 링크가 나옵니다.');
+    }
+  }
   /* 코덱 확인 — 하드웨어 인코더 우선 선택
      latencyMode는 'quality': 파일 저장(오프라인)에서는 인코더가 프레임을 여러 장
      동시에 물고 처리해 처리량이 realtime의 약 2배. realtime은 실시간 송출용이라
@@ -11847,29 +11873,12 @@ async function startExport(){
   const aOk=await AudioEncoder.isConfigSupported(aCfg).catch(()=>({supported:false}));
   const hasAudio=aOk.supported && audioClipsAll().length>0;
 
-  /* 저장 위치 (Chrome: 디스크 직접 기록) */
-  let fileWritable=null;
-  const estGB=(vCfg.bitrate+192000)*outDur*Math.max(1,Math.round(exp.loop||1))/8/1e9;
-  if(batchMode && batchDir){
-    /* 폴더를 골라 두면 파일마다 묻지 않고 그 안에 바로 쓴다 */
-    try{
-      const nm=exportNameOverride || `export_${W}x${H}.mp4`;
-      const fh=await batchDir.getFileHandle(nm,{create:true});
-      fileWritable=await fh.createWritable();
-    }catch(err){ console.error('batch dir write',err);
-      setStatus('고른 폴더에 쓸 수 없어 다운로드 폴더로 저장합니다.'); }
-  }else if(window.showSaveFilePicker && !batchMode){
-    try{
-      const handle=await showSaveFilePicker({
-        suggestedName:`export_${W}x${H}_${new Date().toISOString().slice(0,10)}.mp4`,
-        types:[{description:'MP4 동영상',accept:{'video/mp4':['.mp4']}}]
-      });
-      fileWritable=await handle.createWritable();
-    }catch(e){
-      if(e.name==='AbortError') setStatus('저장 위치 선택을 취소했습니다 — 메모리 방식으로 인코딩합니다…');
+  /* 저장 위치는 위에서 이미 물었다. 메모리 방식이면 용량만 확인한다. */
+  if(!fileWritable){
+    const estGB=(vCfg.bitrate+192000)*outDur*Math.max(1,Math.round(exp.loop||1))/8/1e9;
+    if(estGB>1.8 && !confirm(`예상 파일 크기 약 ${estGB.toFixed(1)}GB — 메모리 방식으로 계속할까요? (화질을 낮추면 줄어듭니다)`)){
+      setStatus('렌더 취소'); return;
     }
-  }else if(estGB>1.8 && !confirm(`예상 파일 크기 약 ${estGB.toFixed(1)}GB — 메모리 방식으로 계속할까요? (화질을 낮추면 줄어듭니다)`)){
-    setStatus('렌더 취소'); return;
   }
 
   try{ await Promise.all([
@@ -11955,7 +11964,7 @@ async function startExport(){
       return clamp(f,0,1); };
     let audioTs=0, fNext=0;
     /* 느릴 때 어디서 시간이 가는지 바로 보이게 — 인코더 대기 / 영상 소스 / 그리기 */
-    let tmWait=0, tmVid=0, tmDraw=0, tmN=0;
+    let tmWait=0, tmVid=0, tmDraw=0, tmN=0; vidSeeks=0;
     for(let segS=0; segS<outDur && !state.cancelRender && !encErr; segS+=SEG){
       const segE=Math.min(outDur, segS+SEG);
       const from=Math.max(0, exStart+segS-pad), to=Math.min(dur, exStart+segE+pad), span=to-from;
@@ -12011,9 +12020,9 @@ async function startExport(){
           let why='';
           if(spd<1.5 && tmN){
             const w=(tmWait/tmN).toFixed(1), v=(tmVid/tmN).toFixed(1), d=(tmDraw/tmN).toFixed(1);
-            why=` · 프레임당 인코더 ${w}ms · 영상 ${v}ms · 그리기 ${d}ms`;
+            why=` · 프레임당 인코더 ${w}ms · 영상 ${v}ms · 그리기 ${d}ms · 되감기 ${vidSeeks}회`;
           }
-          tmWait=tmVid=tmDraw=0; tmN=0;
+          tmWait=tmVid=tmDraw=0; tmN=0; vidSeeks=0;
           setStatus(`<span class="rec">⚡ 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
             +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}`
             +(encoderPickNote? ` · ${encoderPickNote}`:'')+why+`</span>`);
