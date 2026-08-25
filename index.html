@@ -3316,7 +3316,10 @@ function encWait(enc){
   return new Promise(r=>{
     let done=false;
     const fin=()=>{ if(done) return; done=true; enc.ondequeue=null; clearTimeout(to); r(); };
-    const to=setTimeout(fin,50);          /* 이벤트 유실 대비 안전망 (타이머는 반드시 해제) */
+    /* 이벤트 유실 대비 안전망. 4ms/50ms 를 4K 로 A/B 해 봤지만 차이가 없었다
+       (0.51/0.46 대 0.49/0.48) — 인코더가 실제로 그만큼 걸리는 것이라 짧게 잡을
+       이유가 없다. 타이머는 반드시 해제한다. */
+    const to=setTimeout(fin,50);
     enc.ondequeue=fin;
   });
 }
