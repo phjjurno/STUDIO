@@ -3225,7 +3225,7 @@ const yieldTask=()=>new Promise(r=>{const c=new MessageChannel();c.port1.onmessa
 /* H.264 레벨 산출 — 프레임 크기(MaxFS)와 초당 매크로블록(MaxMBPS)을 모두 만족하는 최소 레벨.
    4K60은 초당 194만 MB가 필요해 Level 5.1(98만) 스펙을 넘는다. 레벨이 모자라면 하드웨어
    인코더가 거부하고 소프트웨어로 떨어질 수 있어, 해상도·fps에 맞는 레벨을 지정한다. */
-let encoderPickNote='';
+let encoderPickNote='', upscaleNote='';
 let batchMode=false, exportNameOverride='';
 /* 쇼츠 일괄 내보내기 설정 — 해상도·화질·프레임·저장 폴더 */
 let batchDir=null;                                  /* 고른 폴더 핸들 (없으면 다운로드 폴더) */
@@ -3314,7 +3314,11 @@ async function probeEncoder(baseCfg, W, H, FPS, qmax){
   const num=x=>{ const m=x&&x.match(/(\d+)fps/); return m? +m[1] : 0; };
   const warn=[];
   if(best.fps < FPS*2) warn.push(`인코더가 느립니다(${best.fps.toFixed(0)}fps)`);
-  if(hw && sw && num(hw) <= num(sw)*1.2) warn.push('하드웨어 인코더가 안 붙는 상태');
+  /* 하드웨어가 '조금이라도 빠르면' 정상으로 본다. 예전엔 1.2배 미만이면 경고했는데,
+     4K 는 원래 하드웨어·소프트웨어 차가 작아서(실측 73 대 61) 멀쩡한데도 경고가 떴다.
+     정말 안 붙을 때는 하드웨어가 소프트웨어보다 느려진다(실측 40 대 42). */
+  if(hw && sw && num(hw) < num(sw) && best.fps < FPS*3)
+    warn.push('하드웨어 인코더가 안 붙는 상태');
   best.slow = warn.length? warn.join(' · ')
     +' — 다른 창에서 내보내기가 돌고 있는지, 저전력 모드인지, 화면 녹화 중인지 확인해 보세요' : '';
   best.note=`인코더 ${best.label} (${best.fps.toFixed(0)}fps 기준) — ${log.join(' / ')}`;
@@ -12037,6 +12041,15 @@ async function startExport(){
       const seen=new Set(); let wc=0, all=0;
       const list=[]; eachVideoClip((c,tr,a)=>{ if(!seen.has(a)){ seen.add(a); list.push(a); } });
       for(const a of list){ all++; if(await attachVidDec(a)) wc++; }
+      /* 소스보다 훨씬 크게 뽑으면 화질은 그대로인데 인코딩만 무거워진다.
+         720p 소스를 4K 로 뽑는 경우가 흔한데, 픽셀은 9배라 시간도 그만큼 든다. */
+      let maxPx=0, srcLabel='';
+      for(const a of list){ const px=(a.width||0)*(a.height||0);
+        if(px>maxPx){ maxPx=px; srcLabel=`${a.width}×${a.height}`; } }
+      /* 2배 남짓(720p→1080p)은 흔하고 이득도 있으니 넘어가고, 3배 넘게 키울 때만 알린다 */
+      upscaleNote = (maxPx && W*H > maxPx*3)
+        ? `소스는 ${srcLabel} 인데 ${W}×${H} 로 뽑는 중 — 화질은 소스 이상 좋아지지 않고 인코딩만 약 ${(W*H/maxPx).toFixed(0)}배 무겁습니다`
+        : '';
       if(all) setStatus(`영상 소스 ${all}개 — 직접 디코딩 ${wc}개`
                         + (wc<all? ` · 기존 방식 ${all-wc}개`:'') + ' — 인코딩을 시작합니다…');
     }
@@ -12147,7 +12160,9 @@ async function startExport(){
           }
           setStatus(`<span class="rec">⚡ 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
             +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}`
-            +(encoderPickNote? ` · ${encoderPickNote}`:'')+srcWay+why+`</span>`);
+            +(encoderPickNote? ` · ${encoderPickNote}`:'')
+            +(upscaleNote? ` · <b style="color:#ff9d6b">⚠ ${upscaleNote}</b>`:'')
+            +srcWay+why+`</span>`);
           if(stash){ await stash.spill(); await stash.maybeFlush(); }
           await yieldTask();
         }
