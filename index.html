@@ -7892,7 +7892,11 @@ async function verifyVidDec(a, dec, track){
    실제 촬영본에서 엉뚱한 프레임이 나온 이력이 있어 기본은 꺼 두지만(편집 목록 elst 를
    안 읽는 게 원인으로 의심된다), 내 파일에서는 잘 되는 경우가 많아 켤 수 있게 둔다.
    켜면 미리보기로 먼저 확인하고 쓰라는 뜻이다. */
-let WC_ON=false;
+/* 기본 켬. 끄면 <video> 를 빠르게 재생하며 화면을 긁는 예전 경로로 가는데,
+   지나칠 때마다 되감기 탐색(1회 최대 1.8초)이 걸려 프레임이 뚝뚝 끊기고 앞뒤로 오간다.
+   직접 디코딩은 파일별 그림 검증·해상도 제한·느리면 3회 만에 자동 복귀가 모두 걸려 있어
+   맞지 않는 파일은 조용히 예전 경로로 내려간다. */
+let WC_ON=true;
 /* 소스에 디코더를 붙인다 — 안 되는 파일이면 조용히 예전 방식으로 남는다 */
 async function attachVidDec(a){
   if(a.wcDec && !a.wcDec.dead) return a.wcDec;
@@ -11748,6 +11752,7 @@ $('expScaleRow').addEventListener('click',e=>{
   [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
   exp.scale=+b.dataset.s; expEst();
 });
+$('wcBtn').classList.toggle('on',WC_ON);   /* 기본값을 버튼에 반영 */
 $('wcBtn').onclick=()=>{
   WC_ON=!WC_ON; state.wcForce=WC_ON;
   $('wcBtn').classList.toggle('on',WC_ON);
