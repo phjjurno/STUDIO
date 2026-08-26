@@ -12067,6 +12067,20 @@ async function startExport(){
     let audioTs=0, fNext=0;
     /* 느릴 때 어디서 시간이 가는지 바로 보이게 — 인코더 대기 / 영상 소스 / 그리기 */
     let tmWait=0, tmVid=0, tmDraw=0, tmN=0; vidSeeks=0;
+    /* 남은 시간 계산용 — 영상이 깔린 구간과 아닌 구간은 속도가 5배까지 차이 난다
+       (실측 4K: 영상 구간 67ms/프레임 0.50배속 · 영상 없는 구간 13ms/프레임 2.47배속).
+       예전엔 '지금 속도 × 남은 길이'로 계산해서, 앞 30초에만 영상이 있어도
+       전체가 그 속도인 것처럼 73시간 같은 값이 나왔다. 두 구간을 나눠서 센다. */
+    const vidSpans=[];
+    eachVideoClip((c2,tr2)=>{ const s2=Math.max(exStart,c2.start), e2=Math.min(exEnd,clipVisibleEnd(c2,tr2));
+      if(e2>s2) vidSpans.push([s2,e2]); });
+    vidSpans.sort((a2,b2)=>a2[0]-b2[0]);
+    const merged=[];
+    for(const sp of vidSpans){ const last=merged[merged.length-1];
+      if(last && sp[0]<=last[1]) last[1]=Math.max(last[1],sp[1]); else merged.push(sp.slice()); }
+    const vidSecTotal=merged.reduce((p,q)=>p+(q[1]-q[0]),0);
+    const vidFramesTotal=Math.round(vidSecTotal*FPS);
+    let vidFramesDone=0, vidMsSum=0, plainFramesDone=0, plainMsSum=0, frameT0=performance.now();
     /* 위 셋만으로는 원인이 안 잡혔다(인코더·먹서·메모리는 실측으로 모두 정상).
        구간 오디오 믹싱 / 오디오 인코딩 / 프레임 제출은 그동안 아예 안 재고 있었다.
        인코더가 정말 멈춘 건지 보려고 대기 중 실제로 나온 패킷 수와 큐 길이도 같이 본다. */
@@ -12125,9 +12139,21 @@ async function startExport(){
         vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
         tmSub+=performance.now()-sb0;
         tmN++;
+        { const nowF=performance.now(), dMs=nowF-frameT0; frameT0=nowF;
+          let onVid=false;
+          for(const sp of merged) if(t>=sp[0] && t<sp[1]){ onVid=true; break; }
+          if(onVid){ vidFramesDone++; vidMsSum+=dMs; } else { plainFramesDone++; plainMsSum+=dMs; } }
         if(fNext%15===0){
           const pct=fNext/totalFrames, spd=(fNext/FPS)/((performance.now()-t0)/1000);
-          const eta=spd>0?(outDur-fNext/FPS)/spd:0;
+          /* 남은 시간 — 영상 구간과 아닌 구간을 각각의 실측 속도로 계산한다 */
+          const vLeft=Math.max(0, vidFramesTotal-vidFramesDone);
+          const pLeft=Math.max(0, (totalFrames-vidFramesTotal)-plainFramesDone);
+          const vMs=vidFramesDone? vidMsSum/vidFramesDone : 0;
+          const pMs=plainFramesDone? plainMsSum/plainFramesDone : 0;
+          /* 아직 안 지나간 구간은 상대 비용(4배)으로 어림한다 */
+          const vEst=vMs || (pMs? pMs*4 : 0), pEst=pMs || (vMs? vMs/4 : 0);
+          let eta=(vLeft*vEst + pLeft*pEst)/1000;
+          if(!(eta>0)) eta = spd>0? (outDur-fNext/FPS)/spd : 0;
           $('progressFill').style.width=(pct*100)+'%';
           /* 실시간보다 느리면 프레임당 어디에 시간이 갔는지 함께 보여 준다 */
           let why='';
@@ -12162,7 +12188,10 @@ async function startExport(){
             +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}`
             +(encoderPickNote? ` · ${encoderPickNote}`:'')
             +(upscaleNote? ` · <b style="color:#ff9d6b">⚠ ${upscaleNote}</b>`:'')
-            +srcWay+why+`</span>`);
+            +srcWay
+            +(vidSecTotal>0 && vidSecTotal < outDur*0.9
+               ? ` · 영상 구간 ${fmt(vidSecTotal)}/${fmt(outDur)}(나머지는 훨씬 빠릅니다)` : '')
+            +why+`</span>`);
           if(stash){ await stash.spill(); await stash.maybeFlush(); }
           await yieldTask();
         }
