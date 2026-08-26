@@ -1,5 +1,5 @@
 /* PULSEORIGN STUDIO — Service Worker v3 */
-const CACHE = 'pulseorign-v92';
+const CACHE = 'pulseorign-v93';
 const SHELL = ['./index.html', './manifest.json', './assets/lp_deck.png', './assets/lp_record.png', './assets/lp_arm.png', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -16,6 +16,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
+  /* 속도 비교용 옛 버전은 서비스워커가 손대지 않는다 */
+  if (url.pathname.includes('old-0823')) return;
   const isDoc = e.request.mode === 'navigate' ||
                 url.pathname.endsWith('/') || url.pathname.endsWith('index.html');
   /* index.html(문서) + 폰트/CDN — 네트워크 우선(항상 최신), 오프라인 시 캐시 */
