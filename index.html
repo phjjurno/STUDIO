@@ -11811,7 +11811,9 @@ $('expGo').onclick=async()=>{
 /* ── 루프용 청크 보관소 ──
    인코딩된 패킷을 그대로 모아 뒀다가 타임스탬프만 밀어서 다시 붙입니다.
    같은 화면을 다시 인코딩하지 않으므로 걸리는 시간은 1회분 그대로입니다. */
-const STASH_MEM_MAX=600e6;                 /* 이보다 크면 디스크(OPFS)로 */
+const STASH_MEM_MAX=48e6;                  /* 이보다 크면 디스크(OPFS)로.
+   600MB 였는데 그만큼을 RAM 에 이고 가다가 먹서가 들고 있는 결과물과 겹쳐
+   메모리를 밀어냈다. OPFS 실측 628MB/s(16MB 당 22ms)라 일찍 내려도 손해가 없다. */
 /* 렌더가 중간에 끊겼을 때 남은 임시 파일 청소 */
 async function sweepStash(){
   try{ const root=await navigator.storage.getDirectory();
@@ -11841,7 +11843,11 @@ async function makeStash(){
     async maybeFlush(){ if(st.qBytes>16e6) await st.flush(); },
     /* 메모리 보관분이 한계를 넘으면 통째로 디스크로 내림 */
     async spill(){
-      if(!st.ws || !st.mem.length || st.off<=STASH_MEM_MAX) return;
+      if(!st.ws || !st.mem.length) return;
+      /* 예전엔 st.off(누적 전체)가 한도를 넘을 때까지 기다려서, 그 전까지는
+         한 바이트도 안 내려가고 RAM 에만 쌓였다. 지금 들고 있는 양으로 판단한다. */
+      let held=0; for(const u of st.mem) held+=u.byteLength;
+      if(held<STASH_MEM_MAX && st.off<=STASH_MEM_MAX) return;
       const blob=new Blob(st.mem); st.mem=[]; await st.ws.write(blob); st.wrote=true;
     },
     async seal(){ await st.spill(); await st.flush();
@@ -11929,6 +11935,10 @@ async function startExport(){
   const hasAudio=aOk.supported && audioClipsAll().length>0;
 
   /* 저장 위치는 위에서 이미 물었다. 메모리 방식이면 용량만 확인한다. */
+  if(!fileWritable && Math.round(exp.loop||1)>1){
+    alert('저장 위치를 지정하지 않고 「루프 반복」을 쓰면 결과물과 임시 패킷을 모두 메모리에\n'
+        + '들고 있어야 해서 렌더가 크게 느려집니다. 저장 위치를 골라 주세요.');
+  }
   if(!fileWritable){
     const estGB=(vCfg.bitrate+192000)*outDur*Math.max(1,Math.round(exp.loop||1))/8/1e9;
     if(estGB>1.8 && !confirm(`예상 파일 크기 약 ${estGB.toFixed(1)}GB — 메모리 방식으로 계속할까요? (화질을 낮추면 줄어듭니다)`)){
