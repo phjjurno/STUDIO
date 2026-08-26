@@ -1112,6 +1112,13 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <button class="chip on" data-s="1">표준 (1x)</button>
     <button class="chip" data-s="2">고화질 (2x · 4K급)</button>
   </div>
+  <div class="opt-label">영상 소스 읽는 방식</div>
+  <div class="row">
+    <button class="chip" id="wcBtn">⚡ 직접 디코딩 (실험)</button>
+  </div>
+  <div class="hint2">영상 소스를 <b>재생하지 않고</b> 바로 디코딩합니다 — 특히 4K에서 훨씬 빠릅니다.
+    다만 일부 촬영본에서 엉뚱한 프레임이 나온 적이 있어 기본은 꺼 둡니다.
+    켠 뒤 <b>짧은 구간을 먼저 뽑아 확인</b>하고 쓰세요.</div>
   <div class="opt-label">프레임레이트</div>
   <div class="row" id="expFpsRow">
     <button class="chip on" data-fps="30">30 fps</button>
@@ -7879,7 +7886,13 @@ async function verifyVidDec(a, dec, track){
   return true;
 }
 /* 파일을 직접 뜯어 디코딩하는 경로. 실제 작업물에서 문제가 반복돼 꺼 둔 상태다. */
-const WC_ON=false;
+/* 직접 디코딩 스위치.
+   <video> 를 재생시켜 화면을 긁는 대신, 컨테이너를 뜯어 압축 패킷을 VideoDecoder 에
+   바로 먹인다 — '재생 속도'라는 제약이 사라져 훨씬 빠르다.
+   실제 촬영본에서 엉뚱한 프레임이 나온 이력이 있어 기본은 꺼 두지만(편집 목록 elst 를
+   안 읽는 게 원인으로 의심된다), 내 파일에서는 잘 되는 경우가 많아 켤 수 있게 둔다.
+   켜면 미리보기로 먼저 확인하고 쓰라는 뜻이다. */
+let WC_ON=false;
 /* 소스에 디코더를 붙인다 — 안 되는 파일이면 조용히 예전 방식으로 남는다 */
 async function attachVidDec(a){
   if(a.wcDec && !a.wcDec.dead) return a.wcDec;
@@ -7905,7 +7918,9 @@ async function attachVidDec(a){
        원인을 못 짚었다. 실제 파일로 재현하기 전까지는 예전 <video> 경로만 쓴다. */
     /* 4K 급은 <video> 쪽이 더 빠르고 어차피 프레임을 거의 안 흘린다 (실측
        4K30: <video> 1.10배속·고유 118/120 · 직접 디코딩 0.90배속·고유 120/120). */
-    if(tr.W*tr.H > 2500000){ a.wcSkip='해상도'; return null; }
+    /* 4K 는 예전 실측에서 <video> 가 더 빨라 제외했었다. 직접 켠 경우에는
+       사용자가 자기 파일로 판단하겠다는 뜻이므로 막지 않는다. */
+    if(!state.wcForce && tr.W*tr.H > 2500000){ a.wcSkip='해상도'; return null; }
     const sup=await VideoDecoder.isConfigSupported({
       codec:tr.codec, codedWidth:tr.W, codedHeight:tr.H, description:tr.desc});
     if(!sup.supported) return null;
@@ -8046,7 +8061,9 @@ async function advanceVideosTo(t){
          전체 0.54배속. 부하는 방아쇠일 뿐 회복을 못 하는 게 진짜 문제였다.
        그래서 '앞서 있지 않을 때'는 pace 대신 최소 기준으로 밀어 준다.
        앞서 있으면 예전대로 pace·corr 로 늦추므로 앞질러 달아나지 않는다. */
-    const base=(drift > -VID_AHEAD_KEEP)? Math.max(pace, VID_RATE_MIN) : pace;
+    /* 처져 있을 때만 밀어 준다. 목표에 딱 붙어 있는데도(drift≈0) 밀면 소스가 앞질러
+       달아났다가 멈춰 서기를 반복해 결과물이 뚝뚝 끊긴다. */
+    const base=(drift > VID_AHEAD_KEEP)? Math.max(pace, VID_RATE_MIN) : pace;
     v.playbackRate=clamp(base*need*corr, .1, VID_RATE_MAX);
     if(v.paused){ const pr=v.play();      /* 순차 디코딩 재생. AbortError(탐색이 play를 끊음)는 정상이라 무시 */
       if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(e=>{ if(e&&e.name!=='AbortError') a.noPlay=true; }); }
@@ -11728,6 +11745,16 @@ $('expScaleRow').addEventListener('click',e=>{
   [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
   exp.scale=+b.dataset.s; expEst();
 });
+$('wcBtn').onclick=()=>{
+  WC_ON=!WC_ON; state.wcForce=WC_ON;
+  $('wcBtn').classList.toggle('on',WC_ON);
+  /* 껐다 켤 때 이전 판정을 지워야 다시 시도한다 */
+  for(const a of state.assets.values()){ a.wcTried=false; a.wcSkip=null;
+    if(a.wcDec){ try{ a.wcDec.close(); }catch(e){} a.wcDec=null; a.wcFrame=null; } }
+  setStatus(WC_ON
+    ? '⚡ 직접 디코딩 켬 — 짧은 구간을 먼저 뽑아 그림이 맞는지 확인하세요.'
+    : '직접 디코딩 끔 — 예전 방식(영상 재생)으로 읽습니다.');
+};
 $('expFpsRow').addEventListener('click',e=>{
   const b=e.target.closest('.chip'); if(!b) return;
   [...e.currentTarget.children].forEach(c=>c.classList.remove('on')); b.classList.add('on');
