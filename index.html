@@ -12020,11 +12020,18 @@ async function startExport(){
     let audioTs=0, fNext=0;
     /* 느릴 때 어디서 시간이 가는지 바로 보이게 — 인코더 대기 / 영상 소스 / 그리기 */
     let tmWait=0, tmVid=0, tmDraw=0, tmN=0; vidSeeks=0;
+    /* 위 셋만으로는 원인이 안 잡혔다(인코더·먹서·메모리는 실측으로 모두 정상).
+       구간 오디오 믹싱 / 오디오 인코딩 / 프레임 제출은 그동안 아예 안 재고 있었다.
+       인코더가 정말 멈춘 건지 보려고 대기 중 실제로 나온 패킷 수와 큐 길이도 같이 본다. */
+    let tmMix=0, tmAud=0, tmSub=0, capHits=0, vPktsAt=0, qAtShow=0;
     for(let segS=0; segS<outDur && !state.cancelRender && !encErr; segS+=SEG){
       const segE=Math.min(outDur, segS+SEG);
       const from=Math.max(0, exStart+segS-pad), to=Math.min(dur, exStart+segE+pad), span=to-from;
+      const mx0=performance.now();
       const segBuf=await mixAudioRange(48000, 2, from, to);
+      tmMix+=performance.now()-mx0;
       /* 오디오: 출력 [segS,segE) → 타임라인 [exStart+segS, exStart+segE) + 페이드 */
+      const ax0=performance.now();
       if(hasAudio && aEnc){
         const c0=segBuf.getChannelData(0), c1=segBuf.numberOfChannels>1? segBuf.getChannelData(1):segBuf.getChannelData(0);
         const sIdx=Math.max(0,Math.round((exStart+segS-from)*48000)), eIdx=Math.min(segBuf.length, Math.round((exStart+segE-from)*48000));
@@ -12044,6 +12051,7 @@ async function startExport(){
             await encWait(aEnc);
         }
       }
+      tmAud+=performance.now()-ax0;
       /* 영상: 출력 프레임 ot=fNext/FPS → 타임라인 t=exStart+ot */
       const specSrc={buffer:segBuf};
       const fEnd=Math.min(totalFrames, Math.round(segE*FPS));
@@ -12057,6 +12065,7 @@ async function startExport(){
         while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && performance.now()-bw0<10000)
           await encWait(vEnc);
         const bw1=performance.now(); tmWait+=bw1-bw0;
+        if(bw1-bw0>9900) capHits++;          /* 10초 상한에 걸린 프레임 수 */
         if(vidP) await vidP;
         const bw2=performance.now(); tmVid+=bw2-bw1;
         computeSpectrum(specSrc, clamp(t-from, 0, span-.02));
@@ -12064,8 +12073,10 @@ async function startExport(){
         tmDraw+=performance.now()-bw2;
         if(fadeIn>0||fadeOut>0){ const bf=1-fadeF(ot);   /* 화면 검정 페이드 */
           if(bf>0){ rg.save(); rg.globalAlpha=Math.min(1,bf); rg.fillStyle='#000'; rg.fillRect(0,0,W,H); rg.restore(); } }
+        const sb0=performance.now();
         const vf=new VideoFrame(rcanvas,{timestamp:Math.round(fNext*1e6/FPS),duration:Math.round(1e6/FPS)});
         vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
+        tmSub+=performance.now()-sb0;
         tmN++;
         if(fNext%15===0){
           const pct=fNext/totalFrames, spd=(fNext/FPS)/((performance.now()-t0)/1000);
@@ -12075,9 +12086,17 @@ async function startExport(){
           let why='';
           if(spd<1.5 && tmN){
             const w=(tmWait/tmN).toFixed(1), v=(tmVid/tmN).toFixed(1), d=(tmDraw/tmN).toFixed(1);
-            why=` · 프레임당 인코더 ${w}ms · 영상 ${v}ms · 그리기 ${d}ms · 되감기 ${vidSeeks}회`;
+            const s=(tmSub/tmN).toFixed(1);
+            /* 대기 중에 인코더가 실제로 패킷을 내놓았는지 — 0이면 인코더가 멈춘 것이고,
+               계속 나오는데도 대기가 길면 큐 깊이(QMAX)가 모자란 것이다. */
+            const outN=vPkts-vPktsAt;
+            why=` · 프레임당 인코더 ${w}ms(큐 ${vEnc.encodeQueueSize}, 이 구간 출력 ${outN}장`
+              + (capHits? `, 상한걸림 ${capHits}장`:'') + `)`
+              + ` · 영상 ${v}ms · 그리기 ${d}ms · 제출 ${s}ms`
+              + ` · 오디오 믹싱 ${tmMix.toFixed(0)}ms · 오디오 인코딩 ${tmAud.toFixed(0)}ms`
+              + ` · 되감기 ${vidSeeks}회`;
           }
-          tmWait=tmVid=tmDraw=0; tmN=0; vidSeeks=0;
+          tmWait=tmVid=tmDraw=tmSub=tmMix=tmAud=0; tmN=0; vidSeeks=0; capHits=0; vPktsAt=vPkts;
           /* 영상 소스를 어떤 방식으로 읽고 있는지 — 느릴 때 원인을 바로 짚을 수 있게 */
           let srcWay='';
           if(hasVideoClips){
