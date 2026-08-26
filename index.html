@@ -7904,9 +7904,12 @@ async function attachVidDec(a){
   if(!WC_ON){ a.wcSkip='꺼짐'; return null; }   /* 꺼져 있으면 파일을 읽지도 않는다 */
   a.wcTried=true;
   try{
-    if(!('VideoDecoder' in window) || !a.blob) return null;
-    const moov=await mp4ReadMoov(a.blob); if(!moov) return null;
-    const tr=mp4VideoTrack(moov); if(!tr || !tr.total) return null;
+    if(!('VideoDecoder' in window)){ a.wcSkip='브라우저 미지원'; return null; }
+    if(!a.blob){ a.wcSkip='원본 없음'; return null; }
+    const moov=await mp4ReadMoov(a.blob);
+    if(!moov){ a.wcSkip='MP4/MOV 아님(또는 조각난 파일)'; return null; }
+    const tr=mp4VideoTrack(moov);
+    if(!tr || !tr.total){ a.wcSkip='영상 트랙 못 읽음'; return null; }
     /* ⚠ 지금은 꺼 둔다.
        합성 테스트 영상으로는 프레임이 정확했지만(120/120), 실제 촬영본에서는
        엉뚱한 프레임이 나온다는 보고가 있었다. 편집 목록(elst)이 붙은 파일은
@@ -7923,7 +7926,7 @@ async function attachVidDec(a){
     if(!state.wcForce && tr.W*tr.H > 2500000){ a.wcSkip='해상도'; return null; }
     const sup=await VideoDecoder.isConfigSupported({
       codec:tr.codec, codedWidth:tr.W, codedHeight:tr.H, description:tr.desc});
-    if(!sup.supported) return null;
+    if(!sup.supported){ a.wcSkip='코덱 미지원 '+(tr.codec||''); return null; }
     a.wcTrack=tr; a.wcRot=tr.rot||0;
     const d=makeVidDec(tr, a.blob);
     if(!await verifyVidDec(a, d, tr)){    /* 그림이 다르면 이 파일은 쓰지 않는다 */
@@ -7933,7 +7936,7 @@ async function attachVidDec(a){
     }
     a.wcDec=d;
     return a.wcDec;
-  }catch(e){ return null; }
+  }catch(e){ a.wcSkip='오류 '+(e&&e.name||''); return null; }
 }
 
 /* 앞질러 버린 폭이 이보다 크면 배속을 늦추는 것만으로는 못 돌아온다 → 탐색 1회.
@@ -12075,9 +12078,23 @@ async function startExport(){
             why=` · 프레임당 인코더 ${w}ms · 영상 ${v}ms · 그리기 ${d}ms · 되감기 ${vidSeeks}회`;
           }
           tmWait=tmVid=tmDraw=0; tmN=0; vidSeeks=0;
+          /* 영상 소스를 어떤 방식으로 읽고 있는지 — 느릴 때 원인을 바로 짚을 수 있게 */
+          let srcWay='';
+          if(hasVideoClips){
+            const parts=[];
+            for(const [,a2] of state.assets){
+              if(a2.kind!=='video') continue;
+              parts.push(`${a2.width||'?'}×${a2.height||'?'} `+(a2.wcDec? '직접디코딩'
+                       : '재생'+(a2.wcSkip? `(${a2.wcSkip})` : WC_ON? '(조건 불충족)' : '(스위치 꺼짐)')));
+            }
+            /* 지금 이 순간 실제로 그려지는 영상 컷 수 — 겹쳐 있으면 그만큼 디코딩이 늘어난다 */
+            let act=0;
+            eachVideoClip((c2,tr2)=>{ if(t>=c2.start && t<clipVisibleEnd(c2,tr2)) act++; });
+            if(parts.length) srcWay=` · 소스 ${parts.join(' / ')} · 동시 ${act}컷`;
+          }
           setStatus(`<span class="rec">⚡ 인코딩 중</span> — ${Math.round(pct*100)}% · ${spd.toFixed(1)}배속 · 남은 약 ${fmt(eta)}`
             +`<br><span style="font-size:11px">영상 ${vPkts} 음원 ${aPkts} 패킷 · ${W}×${H}@${FPS}`
-            +(encoderPickNote? ` · ${encoderPickNote}`:'')+why+`</span>`);
+            +(encoderPickNote? ` · ${encoderPickNote}`:'')+srcWay+why+`</span>`);
           if(stash){ await stash.spill(); await stash.maybeFlush(); }
           await yieldTask();
         }
