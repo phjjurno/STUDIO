@@ -794,6 +794,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" id="lvKara" title="지나간 만큼 강조색으로 채우기">노래방 채움</button>
         <button class="chip on" id="lvGlow">글로우</button>
         <button class="chip on" id="lvAnim">등장 모션</button>
+        <button class="chip" id="lvUseSub" title="자막 스타일 탭의 폰트·글자색·강조색을 그대로 씁니다">🔗 자막 스타일 따르기</button>
       </div>
       <div class="opt-label" style="margin-top:9px">표현 방식</div>
       <div class="row" id="lvModeRow" style="gap:6px">
@@ -842,6 +843,10 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" data-tpl="blockrev">블록 리빌</button>
         <button class="chip" data-tpl="hollow">아웃라인</button>
         <button class="chip" data-tpl="marker">마커 스와이프</button>
+        <button class="chip" data-tpl="capsule">💊 캡슐</button>
+        <button class="chip" data-tpl="longshadow">🌒 롱 섀도우</button>
+        <button class="chip" data-tpl="underline">＿ 밑줄</button>
+        <button class="chip" data-tpl="glass">🧊 유리판</button>
       </div>
       <div class="opt-label" style="margin-top:10px">키네틱 (움직이는 자막)</div>
       <div class="row" id="subKinRow">
@@ -883,6 +888,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="row" style="margin-top:6px">
         <button class="chip on" id="subTrShow">번역 표시</button>
         <label class="colorpick"><input type="color" id="subTrColor" value="#BFD0E2">번역 색</label>
+        <label class="colorpick"><input type="color" id="subTrStrokeColor" value="#000000">외곽선 색</label>
       </div>
       <div class="prow"><label>번역 폰트</label><select id="subTrFont"></select></div>
       <div class="sliders">
@@ -890,6 +896,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <input type="range" id="subTrSize" min="40" max="150" value="78"></div>
         <div class="slider"><label>원문과 간격 <span class="slider-rhs"><input type="number" class="snum" id="subTrGapN" min="0" max="120" value="34"><small class="usuf">%</small></span></label>
           <input type="range" id="subTrGap" min="0" max="120" value="34"></div>
+        <div class="slider"><label>번역 외곽선 <span class="slider-rhs"><input type="number" class="snum" id="subTrStrN" min="0" max="40" value="14"><small class="usuf">%</small></span></label>
+          <input type="range" id="subTrStr" min="0" max="40" value="14"></div>
       </div>
       </div></div>
 
@@ -3114,11 +3122,13 @@ const state = {
   /* 리릭 비디오 — SRT 를 가운데 크게 띄우는 모드 */
   lyric:{on:false, size:1, sideSize:.55, dim:.30, x:.5, y:.5, fontIdx:0,
     color:'#FFFFFF', color2:'#FFD400', karaoke:false, context:true, anim:true, glow:true,
+    useSubStyle:false,                    /* 켜면 자막 스타일의 폰트·색을 그대로 쓴다 */
     trans:true, mode:'context', trSize:.62, trGap:.70},   /* 번역 줄 크기·원문과 간격 */
   /* 간격은 원문 글자 크기 기준. 0.62 아래로 내리면 원문과 겹친다(줄높이 1.24의 절반). */
   subStyle:{template:'outline', fontIdx:0, size:1, color:'#FFFFFF', color2:'#FFD400', x:.5, y:.86, anim:true,
     opacity:1, stroke:0, strokeColor:'#000000', plate:0,             /* 가독성 */
-    tr:{show:true, fontIdx:0, size:.78, color:'#BFD0E2', gap:.34}},   /* 번역(아랫줄) */
+    tr:{show:true, fontIdx:0, size:.78, color:'#BFD0E2', gap:.34,
+        stroke:.14, strokeColor:'#000000'}},                          /* 번역(아랫줄) */
   /* 진행 바 */
   progressBar:{show:true, x:.5, y:.88, w:.72, h:.025, style:'glass',
     colorFill:'#E3B564', colorBg:'#FFFFFF', colorText:'#FFFFFF', showTime:true, showName:true},
@@ -8973,7 +8983,10 @@ function drawLyricVideo(t){
     if(idx<0) idx=cs.length-1;
   }
   const {g,w,h}=R, portrait=h>w;
-  const F=FONTS[LV.fontIdx]||FONTS[0];
+  /* 「자막 스타일 따르기」를 켜면 폰트·색을 자막 설정에서 그대로 가져온다 */
+  const US=LV.useSubStyle? (state.subStyle||null) : null;
+  const F=FONTS[US? US.fontIdx : LV.fontIdx]||FONTS[0];
+  const LC=US? US.color : LV.color, LC2=US? US.color2 : LV.color2;
   const mode=LV.mode||'context';
   const showSide=(mode==='context');
   const fsMain=Math.round(w*(portrait?.062:.040)*LV.size*F.mul);
@@ -9042,7 +9055,7 @@ function drawLyricVideo(t){
     const rows=wrapLines(g, cs[i].text, w*.86);
     const bH=rows.length*lineH(fsSide);
     const y0=cy + dir*(blockH*.5 + fsMain*.55 + bH*.5);
-    g.globalAlpha=LV.dim*gapFade; g.fillStyle=LV.color2;
+    g.globalAlpha=LV.dim*gapFade; g.fillStyle=LC2;
     rows.forEach((L,k)=>g.fillText(L, cx, y0+(k-(rows.length-1)/2)*lineH(fsSide)));
     g.globalAlpha=1;
   };
@@ -9072,23 +9085,23 @@ function drawLyricVideo(t){
   g.translate(cx,cy+dy); g.scale(sc,sc); g.translate(-cx,-cy);
   const topY=cy - blockH/2 + lineH(fsMain)/2;
   g.font=mainFont;
-  if(LV.glow){ g.shadowColor=hexA(LV.color,.55); g.shadowBlur=w*.012; }
+  if(LV.glow){ g.shadowColor=hexA(LC,.55); g.shadowBlur=w*.012; }
   if(state.shadowOn){ g.shadowColor=g.shadowColor||'rgba(0,0,0,.6)'; g.shadowOffsetY=2; }
   const prog=active? clamp(lt/Math.max(.2,(clipEnd(cs[idx])-cs[idx].start)),0,1) : 0;
   mainRows.forEach((L,k)=>{
     const y=topY + k*lineH(fsMain);
-    g.fillStyle=LV.color; g.fillText(L,cx,y);
+    g.fillStyle=LC; g.fillText(L,cx,y);
     if(LV.karaoke && active){
       const lw=g.measureText(L).width;
       g.save(); g.beginPath();
       g.rect(cx-lw/2, y-fsMain, lw*clamp(prog*mainRows.length-k,0,1), fsMain*2); g.clip();
-      g.fillStyle=LV.color2; g.fillText(L,cx,y); g.restore();
+      g.fillStyle=LC2; g.fillText(L,cx,y); g.restore();
     }
   });
   /* 번역 — 원문 아래, 조금 작게 */
   if(trRows.length){
     g.shadowBlur=0; g.shadowOffsetY=0;
-    g.font=trFont; g.fillStyle=hexA(LV.color,.82);
+    g.font=trFont; g.fillStyle=hexA(LC,.82);
     const trTop=topY + (mainRows.length-1)*lineH(fsMain) + trGap + lineH(fsTr)/2;
     trRows.forEach((L,k)=> g.fillText(L, cx, trTop + k*lineH(fsTr)));
   }
@@ -9236,6 +9249,45 @@ function drawSubs(t){
       shadow(false);
       g.lineJoin='round'; g.strokeStyle='#000'; g.lineWidth=Math.max(2,fs*.16);
       for(const wd of L) g.strokeText(wd.txt,wd.x,ly);
+      g.fillStyle=st.color;
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+
+    }else if(T==='capsule'){          /* 알약 배경 — 강조색 캡슐 위에 어두운 글자 */
+      shadow(false);
+      const padX=fs*.55, padY=fs*.34, h2=fs+padY*1.5;
+      g.fillStyle=st.color2;
+      roundRect(g, lx-padX, ly-fs*.92-padY*.4, L.tw+padX*2, h2, h2/2); g.fill();
+      g.fillStyle='#15161A';
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+
+    }else if(T==='longshadow'){       /* 롱 섀도우 — 대각선으로 길게 깔린 그림자 */
+      shadow(false);
+      /* 촘촘히 겹쳐야 뭉치지 않고 매끈한 대각선 그림자가 된다 */
+      const step=Math.max(1, fs*.014), n2=18;
+      for(let k=n2;k>=1;k--){
+        g.fillStyle=`rgba(0,0,0,${(0.5*(1-k/n2)+0.12).toFixed(3)})`;
+        for(const wd of L) g.fillText(wd.txt, wd.x+k*step, ly+k*step);
+      }
+      g.fillStyle=st.color;
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+
+    }else if(T==='underline'){        /* 밑줄 — 글자는 담백하게, 강조색 밑줄 */
+      shadow(true);
+      g.fillStyle=st.color;
+      for(const wd of L) g.fillText(wd.txt,wd.x,ly);
+      shadow(false);
+      g.fillStyle=st.color2;
+      const uh=Math.max(2, fs*.08);
+      roundRect(g, lx, ly+fs*.22, L.tw, uh, uh/2); g.fill();
+
+    }else if(T==='glass'){            /* 유리판 — 반투명 판 + 옅은 테두리 */
+      shadow(false);
+      const padX=fs*.5, padY=fs*.32, bh=fs+padY*1.6;
+      g.fillStyle='rgba(240,246,255,.14)';
+      roundRect(g, lx-padX, ly-fs-padY*.6, L.tw+padX*2, bh, fs*.3); g.fill();
+      g.strokeStyle='rgba(255,255,255,.30)'; g.lineWidth=Math.max(1,fs*.02);
+      roundRect(g, lx-padX, ly-fs-padY*.6, L.tw+padX*2, bh, fs*.3); g.stroke();
+      shadow(true);
       g.fillStyle=st.color;
       for(const wd of L) g.fillText(wd.txt,wd.x,ly);
 
@@ -9537,9 +9589,13 @@ function drawSubs(t){
     g.textAlign='center';
     let ty=y0+(lines.length-1)*lineH+trGap+trFs;
     g.lineJoin='round';
+    const trStrk=clamp(TR.stroke!=null? TR.stroke : .14, 0, .4);
     for(const L of trLines){
-      g.strokeStyle='rgba(0,0,0,.8)'; g.lineWidth=Math.max(1.5,trFs*.14);
-      g.strokeText(L, cx, ty);
+      if(trStrk>.002){                       /* 0 이면 외곽선 없이 */
+        g.strokeStyle=TR.strokeColor||'#000000';
+        g.lineWidth=Math.max(1, trFs*trStrk);
+        g.strokeText(L, cx, ty);
+      }
       g.fillStyle=TR.color||'#BFD0E2';
       g.fillText(L, cx, ty);
       ty+=trLineH;
@@ -10394,6 +10450,7 @@ function syncLyricUI(){
   const LV=state.lyric;
   const set=(id,on)=>{ const b=$(id); if(b) b.classList.toggle('on',!!on); };
   set('lvOn',LV.on); set('lvTrans',LV.trans!==false); set('lvKara',LV.karaoke);
+  set('lvUseSub',LV.useSubStyle);
   set('lvGlow',LV.glow); set('lvAnim',LV.anim);
   const b=$('lvOn'); if(b) b.textContent = LV.on? '🎤 리릭 비디오 켜짐' : '🎤 리릭 비디오 켜기';
   document.querySelectorAll('#lvModeRow [data-lvmode]').forEach(c=>
@@ -10426,7 +10483,7 @@ $('lvOn').onclick=()=>{ state.lyric.on=!state.lyric.on; syncLyricUI(); drawNow()
   setStatus(state.lyric.on
     ? '리릭 비디오 켜짐 — 자막이 화면 가운데에 크게 뜹니다. 미리보기에서 잡아 옮길 수 있어요.'
     : '리릭 비디오 끔 — 일반 자막 스타일로 돌아갑니다.'); };
-lvToggle('lvTrans','trans'); lvToggle('lvKara','karaoke');
+lvToggle('lvTrans','trans'); lvToggle('lvKara','karaoke'); lvToggle('lvUseSub','useSubStyle');
 lvToggle('lvGlow','glow'); lvToggle('lvAnim','anim');
 document.querySelectorAll('#lvModeRow [data-lvmode]').forEach(b=>{
   b.onclick=()=>{ state.lyric.mode=b.dataset.lvmode; syncLyricUI(); drawNow();
@@ -10534,6 +10591,8 @@ const bindTr=(rid,nid,fn)=>{
 };
 bindTr('subTrSize','subTrSizeN',v=>subTr().size=v/100);
 bindTr('subTrGap','subTrGapN',v=>subTr().gap=v/100);
+bindTr('subTrStr','subTrStrN',v=>subTr().stroke=v/100);
+$('subTrStrokeColor').addEventListener('input',e=>{ subTr().strokeColor=e.target.value; drawNow(); });
 
 /* ═══════ 속성 패널 ═══════ */
 /* ───────── 여러 클립 일괄 편집 ─────────
@@ -12459,7 +12518,11 @@ function applySettings(s){
 function syncUIFromState(){
   const pick=(rowId,fn)=>[...$(rowId).children].forEach(c=>c.classList.toggle('on',fn(c)));
   /* 선언보다 먼저 쓰이던 자리가 있어 여기서 멈췄었다(파형 슬라이더 동기화가 통째로 안 됨) */
-  const setS=(id,vid,val,suf='%')=>{ $(id).value=val; $(vid).textContent=val+suf; const n=$(id+'N'); if(n) n.value=val; };
+  /* 슬라이더가 없어졌는데 호출이 남아 있으면 여기서 예외가 나고 그 뒤 UI 는 통째로
+     복원되지 않는다(실제로 파형 밝기·대비 슬라이더가 사라진 뒤 그랬다). 없으면 건너뛴다. */
+  const setS=(id,vid,val,suf='%')=>{ const r=$(id); if(!r) return;
+    r.value=val; const b=$(vid); if(b) b.textContent=val+suf;
+    const n=$(id+'N'); if(n) n.value=val; };
   pick('ratioRow',c=>+c.dataset.w===state.ratio.w&&+c.dataset.h===state.ratio.h);
   canvas.width=state.ratio.w; canvas.height=state.ratio.h;
   pick('motionRow',c=>c.dataset.mo===state.motion);
@@ -12522,8 +12585,6 @@ function syncUIFromState(){
   setS('lvY','lvYV',Math.round((LV.y??.5)*100));
   if(typeof syncLyricUI==='function') syncLyricUI();
   setS('wavePanel','wavePanelV',Math.round((state.el.wave.panel!=null?state.el.wave.panel:1)*100));
-  setS('waveBr','waveBrV',Math.round((state.el.wave.bright!=null?state.el.wave.bright:1)*100));
-  setS('waveCo','waveCoV',Math.round((state.el.wave.con!=null?state.el.wave.con:1)*100));
   setS('waveOp','waveOpV',Math.round((state.el.wave.op!=null?state.el.wave.op:1)*100));
   setS('waveSd','waveSdV',Math.round((state.el.wave.shadow!=null?state.el.wave.shadow:0)*100));
   setS('lpScale','lpScaleV',Math.round((state.el.lp?state.el.lp.scale||1:1)*100));
@@ -12552,6 +12613,9 @@ function syncUIFromState(){
     const sz=Math.round((t.size!=null?t.size:.78)*100), gp=Math.round((t.gap!=null?t.gap:.34)*100);
     $('subTrSize').value=sz; $('subTrSizeN').value=sz;
     $('subTrGap').value=gp; $('subTrGapN').value=gp;
+    const stk=Math.round((t.stroke!=null?t.stroke:.14)*100);
+    if($('subTrStr')){ $('subTrStr').value=stk; $('subTrStrN').value=stk; }
+    if($('subTrStrokeColor')) $('subTrStrokeColor').value=t.strokeColor||'#000000';
   }
   /* 진행 바 UI 동기화 */
   const pb=state.progressBar;
