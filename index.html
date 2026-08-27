@@ -372,6 +372,16 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
     <!-- 디자인 탭 -->
     <div class="tabPane" id="tabDesign">
+      <div class="grp"><div class="grp-h">내 디자인 (저장·불러오기)<span class="chev">▾</span></div><div class="grp-b">
+      <div class="row" style="margin-top:8px;gap:6px;align-items:center">
+        <input type="text" id="dpName" placeholder="이름 (예: 감성 힙합 기본)" maxlength="30"
+               style="flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;padding:7px 10px;outline:none">
+        <button class="chip" id="dpSave">💾 저장</button>
+      </div>
+      <div id="dpList" style="margin-top:8px"></div>
+      <div class="empty-note" id="dpEmpty">지금 화면 설정을 이름 붙여 저장해 두면 다음 영상에 그대로 불러옵니다</div>
+      </div></div>
+
       <div class="grp"><div class="grp-h">배경 · 모션 · 질감<span class="chev">▾</span></div><div class="grp-b">
       <div class="opt-label">배경 (영상 클립이 없는 곳에 표시)</div>
       <div class="row">
@@ -480,10 +490,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <input type="range" id="lpBr" min="20" max="200" value="100"></div>
         <div class="slider"><label>LP 대비 <span class="slider-rhs"><b id="lpCoV" style="display:none">100%</b><input type="number" class="snum" id="lpCoN" min="20" max="220" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="lpCo" min="20" max="220" value="100"></div>
-        <div class="hint2">배경 영상 위에 얹을 땐 투명도를 낮추고 밝기·대비를 배경에 맞추면 자연스럽게 붙습니다.</div>
       </div>
       </div>
-      <div class="hint2" id="lpHint" style="display:none;margin-top:6px">💿 배경(배경 탭에서 사진 업로드) 위에 도는 레코드가 얹힙니다. 미리보기에서 드래그로 옮기고, 「LP 크기」로 크기를 조절하세요.</div>
       </div></div>
 
       <div class="grp"><div class="grp-h">제목 · 트랙번호<span class="chev">▾</span></div><div class="grp-b">
@@ -541,7 +549,6 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <div class="slider"><label>제목 크기 <span class="slider-rhs"><b id="titleSizeV" style="display:none">100%</b><input type="number" class="snum" id="titleSizeN" min="50" max="170" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="titleSize" min="50" max="170" value="100"></div>
       </div>
-      <div class="hint2" style="margin:6px 0">✅ 모든 폰트는 Google Fonts <b>OFL/Apache</b> 라이선스 — 유튜브 등 <b>상업적 이용 가능</b>합니다.</div>
       </div></div>
 
       <div class="sub"><div class="sub-h">색상 · 가독성<span class="chev">▾</span></div><div class="sub-b">
@@ -564,7 +571,6 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <div class="slider"><label>뒤 어둡게 <span class="slider-rhs"><b id="titlePlateV" style="display:none">0%</b><input type="number" class="snum" id="titlePlateN" min="0" max="90" value="0"><small class="usuf">%</small></span></label>
           <input type="range" id="titlePlate" min="0" max="90" value="0"></div>
       </div>
-      <div class="hint2">밝은 배경에서 글씨가 묻히면 <b>외곽선 두께</b>를 5~12%, 그래도 안 되면 <b>뒤 어둡게</b>를 30~50%로 올려 보세요.</div>
       </div></div>
 
       <div class="sub"><div class="sub-h">효과 · 스타일<span class="chev">▾</span></div><div class="sub-b">
@@ -580,7 +586,6 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       <div class="opt-label">제목 색감</div>
       <div class="row" id="titleHueRow"></div>
-      <div class="hint2" style="margin-top:6px">색감은 <b>제목 색</b>을 바꿉니다. 테이프는 이 색이 띠 색이 되고 글자는 밝기에 따라 자동으로 검정/흰색이 됩니다.</div>
       </div></div>
 
       <div class="sub"><div class="sub-h">곡이 바뀔 때 등장<span class="chev">▾</span></div><div class="sub-b">
@@ -632,8 +637,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       <div class="grp"><div class="grp-h">파형<span class="chev">▾</span></div><div class="grp-b">
       <div class="row" style="margin-top:10px">
         <label class="colorpick"><input type="color" id="waveColor" value="#FFFFFF">파형 색</label>
-        <span class="hint2" style="margin:0">「제목」 칸의 추천 팔레트를 고르면 이 색도 함께 바뀝니다</span>
-      </div>
+              </div>
       <div class="opt-label">파형 스타일</div>
       <div class="row" id="waveRow">
         <button class="chip" data-wv="off">끄기</button>
@@ -681,17 +685,19 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
           <input type="range" id="waveSW" min="30" max="220" value="100"></div>
         <div class="slider"><label>파형 세로 크기 <span class="slider-rhs"><b id="waveSHV" style="display:none">100%</b><input type="number" class="snum" id="waveSHN" min="30" max="220" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="waveSH" min="30" max="220" value="100"></div>
-        <div class="slider"><label>다이내믹 <small style="color:var(--dim)">(최고·최저 차이)</small> <span class="slider-rhs"><b id="waveDynV" style="display:none">45%</b><input type="number" class="snum" id="waveDynN" min="0" max="100" value="45"><small class="usuf">%</small></span></label>
+        <div class="slider"><label>다이내믹 <span class="slider-rhs"><b id="waveDynV" style="display:none">45%</b><input type="number" class="snum" id="waveDynN" min="0" max="100" value="45"><small class="usuf">%</small></span></label>
           <input type="range" id="waveDyn" min="0" max="100" value="45"></div>
-        <div class="slider"><label>파형 밝기 <span class="slider-rhs"><b id="waveBrV" style="display:none">100%</b><input type="number" class="snum" id="waveBrN" min="20" max="220" value="100"><small class="usuf">%</small></span></label>
-          <input type="range" id="waveBr" min="20" max="220" value="100"></div>
-        <div class="slider"><label>파형 대비 <span class="slider-rhs"><b id="waveCoV" style="display:none">100%</b><input type="number" class="snum" id="waveCoN" min="20" max="220" value="100"><small class="usuf">%</small></span></label>
-          <input type="range" id="waveCo" min="20" max="220" value="100"></div>
         <div class="slider"><label>파형 투명도 <span class="slider-rhs"><b id="waveOpV" style="display:none">100%</b><input type="number" class="snum" id="waveOpN" min="10" max="100" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="waveOp" min="10" max="100" value="100"></div>
-        <div class="slider"><label>뒤 배경 그림자 <small style="color:var(--dim)">(어두운 색 파형용)</small> <span class="slider-rhs"><b id="waveSdV" style="display:none">0%</b><input type="number" class="snum" id="waveSdN" min="0" max="100" value="0"><small class="usuf">%</small></span></label>
+        <div class="slider"><label>뒤 어둡게 <span class="slider-rhs"><b id="waveSdV" style="display:none">0%</b><input type="number" class="snum" id="waveSdN" min="0" max="100" value="0"><small class="usuf">%</small></span></label>
           <input type="range" id="waveSd" min="0" max="100" value="0"></div>
-        <div class="slider"><label>패널·종이 투명도 <small style="color:var(--dim)">(VU·스코프·질감)</small> <span class="slider-rhs"><b id="wavePanelV" style="display:none">100%</b><input type="number" class="snum" id="wavePanelN" min="0" max="100" value="100"><small class="usuf">%</small></span></label>
+      </div>
+      <div class="row" id="waveSdShape" style="gap:4px">
+        <button class="chip on" data-sds="soft">부드럽게</button>
+        <button class="chip" data-sds="panel">판</button>
+      </div>
+      <div class="sliders">
+        <div class="slider"><label>패널·종이 투명도 <span class="slider-rhs"><b id="wavePanelV" style="display:none">100%</b><input type="number" class="snum" id="wavePanelN" min="0" max="100" value="100"><small class="usuf">%</small></span></label>
           <input type="range" id="wavePanel" min="0" max="100" value="100"></div>
       </div>
       </div></div>
@@ -5658,28 +5664,37 @@ function drawWaveScrim(bd, op){
   if(lastWaveBox){ bx=lastWaveBox[0]; by=lastWaveBox[1]; bw=lastWaveBox[2]; bh=lastWaveBox[3]; }
   else { bw=w*.86*(wv.sw||1); bh=h*.34*(wv.sh||1); bx=wv.x*w-bw/2; by=wv.y*h-bh/2; }
   if(!(bw>1&&bh>1)) return;
-  const cx=bx+bw/2, cy=by+bh/2, rx=bw*.72, ry=bh*.95;
+  const cx=bx+bw/2, cy=by+bh/2;
   const col = hexLum(state.waveColor)>.5 ? '0,0,0' : '255,255,255';
   g.save();
   g.globalAlpha=clamp(op,0,1);
-  g.translate(cx,cy); g.scale(rx,ry);
-  const grd=g.createRadialGradient(0,0,0,0,0,1);
-  grd.addColorStop(0,   `rgba(${col},${(.60*bd).toFixed(3)})`);
-  grd.addColorStop(.55, `rgba(${col},${(.30*bd).toFixed(3)})`);
-  grd.addColorStop(1,   `rgba(${col},0)`);
-  g.fillStyle=grd;
-  g.beginPath(); g.arc(0,0,1,0,Math.PI*2); g.fill();
+  if((wv.sdShape||'soft')==='panel'){
+    /* 판 — 가장자리가 또렷한 둥근 사각형. 채우기 한 번이라 사실상 공짜다. */
+    const padX=bw*.06, padY=bh*.10;
+    const px=bx-padX, py=by-padY, pw=bw+padX*2, ph=bh+padY*2;
+    g.fillStyle=`rgba(${col},${(.72*bd).toFixed(3)})`;
+    roundRect(g, px, py, pw, ph, Math.min(ph*.28, pw*.06)); g.fill();
+  }else{
+    const rx=bw*.72, ry=bh*.95;
+    g.translate(cx,cy); g.scale(rx,ry);
+    const grd=g.createRadialGradient(0,0,0,0,0,1);
+    grd.addColorStop(0,   `rgba(${col},${(.60*bd).toFixed(3)})`);
+    grd.addColorStop(.55, `rgba(${col},${(.30*bd).toFixed(3)})`);
+    grd.addColorStop(1,   `rgba(${col},0)`);
+    g.fillStyle=grd;
+    g.beginPath(); g.arc(0,0,1,0,Math.PI*2); g.fill();
+  }
   g.restore();
 }
 function drawWave(live){
   const wv=state.el.wave, {g}=R;
   const op=clamp(wv.op!=null?wv.op:1,0,1);
-  const br=wv.bright!=null?wv.bright:1, co=wv.con!=null?wv.con:1;
   const bd=clamp(wv.shadow!=null?wv.shadow:0,0,1);
   if(bd>.002) drawWaveScrim(bd, op);
   g.save();
   if(op<1) g.globalAlpha*=op;
-  if(br!==1||co!==1){ try{ g.filter=`brightness(${br}) contrast(${co})`; }catch(e){} }
+  /* 밝기·대비 조절은 뺐다 — 캔버스 filter 는 프레임마다 별도 합성 레이어를 만들어
+     4K 에서 값이 컸다. 파형을 잘 보이게 하는 건 뒤 어둡게(scrim)로 한다. */
   drawWaveCore(live);
   g.restore();
 }
@@ -11457,10 +11472,13 @@ bindSlider('waveSW','waveSWV',v=>state.el.wave.sw=v/100);
 bindSlider('waveSH','waveSHV',v=>state.el.wave.sh=v/100);
 bindSlider('waveDyn','waveDynV',v=>state.waveDyn=v/100);
 bindSlider('wavePanel','wavePanelV',v=>state.el.wave.panel=v/100);
-bindSlider('waveBr','waveBrV',v=>state.el.wave.bright=v/100);
-bindSlider('waveCo','waveCoV',v=>state.el.wave.con=v/100);
 bindSlider('waveOp','waveOpV',v=>state.el.wave.op=v/100);
 bindSlider('waveSd','waveSdV',v=>state.el.wave.shadow=v/100);
+$('waveSdShape').addEventListener('click',e=>{
+  const b=e.target.closest('.chip'); if(!b) return;
+  [...$('waveSdShape').children].forEach(c=>c.classList.remove('on'));
+  b.classList.add('on'); state.el.wave.sdShape=b.dataset.sds; drawNow();
+});
 bindSlider('titleSize','titleSizeV',v=>state.titleScale=v/100);
 /* 진행 바 슬라이더 */
 bindSlider('pbX','pbXV',v=>state.progressBar.x=v/100);
@@ -11588,7 +11606,7 @@ $('tplRow').addEventListener('click',e=>{
   state.template=b.dataset.tp;
   const lp=state.template==='lp';
   $('lpOpts').style.display=lp?'':'none';
-  $('lpHint').style.display=lp?'':'none';
+  { const lh=$('lpHint'); if(lh) lh.style.display=lp?'':'none'; }
   if(lp) ensureLP();
   drawNow();
 });
@@ -11665,6 +11683,21 @@ document.querySelectorAll('#sideTabs button').forEach(b=>b.addEventListener('cli
   b.classList.add('on'); $(b.dataset.tab).classList.add('on');
   syncHookGhost(b.dataset.tab==='tabShorts');
 }));
+/* 내 디자인 저장 */
+$('dpSave').addEventListener('click',()=>{
+  const el=$('dpName'), nm=(el.value||'').trim();
+  if(!nm){ setStatus('저장할 이름을 적어 주세요.'); el.focus(); return; }
+  const l=dpList();
+  const i=l.findIndex(p=>p.name===nm);
+  const item={name:nm, set:dpSnapshot(), at:Date.now()};
+  if(i>=0){ if(!confirm(`「${nm}」이 이미 있습니다 — 덮어쓸까요?`)) return; l[i]=item; }
+  else l.push(item);
+  if(!dpStore(l)) return;
+  el.value=''; renderDPresets();
+  setStatus(`「${nm}」로 저장했습니다 — 다음 영상에서 눌러 그대로 불러오세요.`);
+});
+$('dpName').addEventListener('keydown',e=>{ if(e.key==='Enter') $('dpSave').click(); });
+renderDPresets();
 document.querySelectorAll('.sub-h').forEach(h=>
   h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
 /* 프로젝트 목록 — 미리보기 오른쪽에서 열고 닫는다 */
@@ -12321,6 +12354,62 @@ async function projDel(name){ const db=await pdb(); return new Promise((res,rej)
   const tx=db.transaction('projects','readwrite'); tx.objectStore('projects').delete(name);
   tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
 
+/* ───────── 내 디자인 (저장·불러오기) ─────────
+   디자인 탭에서 맞춰 둔 것 — 배경·모션·질감·템플릿·제목·파형·진행 바·로고와
+   화면 요소 위치까지 — 를 이름 붙여 브라우저에 저장하고 다음 영상에 그대로 얹는다.
+   곡 사이 전환음은 뺀다(그건 클립 위치를 밀기 때문에 디자인이 아니라 편집이다). */
+const DPRESET_KEY='pulseorign.design.v1';
+function dpList(){ try{ const v=JSON.parse(localStorage.getItem(DPRESET_KEY)||'[]');
+  return Array.isArray(v)? v : []; }catch(e){ return []; } }
+function dpStore(list){
+  try{ localStorage.setItem(DPRESET_KEY, JSON.stringify(list)); return true; }
+  catch(e){ setStatus('브라우저 저장 공간이 부족해 디자인을 저장하지 못했습니다.'); return false; }
+}
+function dpSnapshot(){
+  const s=snapshotSettings();
+  delete s.tape;                       /* 전환음은 디자인이 아니다 */
+  return s;
+}
+function dpApply(p){
+  markUndo();
+  const s=JSON.parse(JSON.stringify(p.set));
+  /* 배경 사진을 쓰던 설정인데 지금 사진이 없으면 그라디언트로 — 안 그러면 검은 화면이 된다 */
+  if(s.bg && s.bg.type==='image' && !state.bg.img) s.bg.type='gradient';
+  applySettings(s);
+  syncUIFromState();
+  renderAll(); drawNow();
+  setStatus(`「${p.name}」 디자인을 불러왔습니다 — 실행 취소(Ctrl+Z)로 되돌릴 수 있어요.`);
+}
+function renderDPresets(){
+  const box=$('dpList'), empty=$('dpEmpty'); if(!box) return;
+  const list=dpList();
+  box.innerHTML='';
+  if(empty) empty.style.display=list.length? 'none' : '';
+  list.forEach((p,i)=>{
+    const row=document.createElement('div'); row.className='hkrow'; row.style.marginBottom='4px';
+    const use=document.createElement('button');
+    use.className='chip hk-item'; use.textContent=p.name;
+    use.title='누르면 이 디자인을 지금 화면에 적용합니다';
+    use.onclick=()=>dpApply(p);
+    const upd=document.createElement('button'); upd.className='mini'; upd.textContent='⟳';
+    upd.title='지금 화면 설정으로 덮어쓰기';
+    upd.onclick=()=>{ if(!confirm(`「${p.name}」을 지금 화면 설정으로 덮어쓸까요?`)) return;
+      const l=dpList(); l[i]={...l[i], set:dpSnapshot(), at:Date.now()};
+      if(dpStore(l)){ renderDPresets(); setStatus(`「${p.name}」을 지금 설정으로 덮어썼습니다.`); } };
+    const ren=document.createElement('button'); ren.className='mini'; ren.textContent='✎';
+    ren.title='이름 바꾸기';
+    ren.onclick=()=>{ const v=prompt('새 이름', p.name); if(v==null) return;
+      const nm=v.trim(); if(!nm) return;
+      const l=dpList(); l[i]={...l[i], name:nm};
+      if(dpStore(l)) renderDPresets(); };
+    const rm=document.createElement('button'); rm.className='mini'; rm.textContent='✕';
+    rm.title='삭제';
+    rm.onclick=()=>{ if(!confirm(`「${p.name}」을 지울까요?`)) return;
+      const l=dpList(); l.splice(i,1);
+      if(dpStore(l)) renderDPresets(); };
+    row.append(use,upd,ren,rm); box.appendChild(row);
+  });
+}
 function snapshotSettings(){
   return { ratio:{...state.ratio},
     bg:{type:state.bg.type, idx:state.bg.idx, scale:state.bg.scale, ox:state.bg.ox, oy:state.bg.oy, dark:state.bg.dark, bright:state.bg.bright, con:state.bg.con},
@@ -12386,7 +12475,7 @@ function syncUIFromState(){
   if($('titleStrokeColor')) $('titleStrokeColor').value=state.titleStrokeColor||'#000000';
   syncTitleHue();
   $('lpOpts').style.display=state.template==='lp'?'':'none';
-  $('lpHint').style.display=state.template==='lp'?'':'none';
+  { const lh=$('lpHint'); if(lh) lh.style.display=state.template==='lp'?'':'none'; }
   $('lpArmBtn').classList.toggle('on',!!state.lpTonearm);
   $('lpSideTitleBtn').classList.toggle('on',!!state.lpSideTitle);
   const TL=state.trackLabel;
