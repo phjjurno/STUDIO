@@ -12744,17 +12744,25 @@ function buildTimestamps(){
     const at=(i===0)? 0 : c.start;              /* 첫 곡은 0:00 (앞의 전환음까지 포함) */
     return {at, name:(c.title||(a?a.name:'')||`트랙 ${i+1}`)};
   });
+  /* 마지막 곡이 끝나는 자리에 REPEAT — 반복 재생본에서 한 바퀴 도는 지점 표시 */
+  const lastEnd=clipEnd(cs[cs.length-1]);
+  const songs=rows.length;
+  rows.push({at:lastEnd, name:'REPEAT', repeat:true});
   /* 첫 줄은 유튜브가 확실히 인식하는 00:00 표기로 고정 (1시간 이상이어도 동일) */
   const lines=rows.map((r,i)=>`${i===0? '00:00' : f(r.at)} ${r.name}`);
   /* 유튜브가 거부하는 조건은 미리 알려 준다 */
   const warn=[];
-  if(rows.length<3) warn.push(`곡이 ${rows.length}개 — 유튜브는 챕터가 3개 이상이어야 인식합니다.`);
+  if(songs<3) warn.push(`곡이 ${songs}개 — 유튜브는 챕터가 3개 이상이어야 인식합니다.`);
+  /* 반복 횟수만큼 실제 영상은 길어진다 — REPEAT 뒤 길이는 그걸로 잰다 */
+  const loopN=Math.max(1, Math.round((typeof exp!=='undefined' && exp.loop)||1));
+  const videoEnd=total*loopN;
   const short=[];
   for(let i=0;i<rows.length;i++){
-    const end=(i<rows.length-1)? rows[i+1].at : total;
-    if(end-rows[i].at < 10) short.push(`${i+1}번 「${rows[i].name}」`);
+    const end=(i<rows.length-1)? rows[i+1].at : videoEnd;
+    if(end-rows[i].at < 10) short.push(rows[i].repeat? '「REPEAT」' : `${i+1}번 「${rows[i].name}」`);
   }
   if(short.length) warn.push(`10초보다 짧은 챕터: ${short.join(', ')} — 유튜브가 무시합니다.`);
+  if(loopN<2) warn.push('반복 없이 한 번만 내보내면 REPEAT 뒤에 남는 길이가 없습니다 — 그 줄은 지우고 올리세요.');
   return {text:lines.join('\n'), warn};
 }
 $('tsBtn').addEventListener('click',()=>{
