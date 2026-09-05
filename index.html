@@ -7910,23 +7910,17 @@ async function verifyVidDec(a, dec, track){
   }catch(e){ return false; }
   return true;
 }
-/* 파일을 직접 뜯어 디코딩하는 경로. 실제 작업물에서 문제가 반복돼 꺼 둔 상태다. */
-/* 직접 디코딩 스위치.
-   <video> 를 재생시켜 화면을 긁는 대신, 컨테이너를 뜯어 압축 패킷을 VideoDecoder 에
-   바로 먹인다 — '재생 속도'라는 제약이 사라져 훨씬 빠르다.
-   실제 촬영본에서 엉뚱한 프레임이 나온 이력이 있어 기본은 꺼 두지만(편집 목록 elst 를
-   안 읽는 게 원인으로 의심된다), 내 파일에서는 잘 되는 경우가 많아 켤 수 있게 둔다.
-   켜면 미리보기로 먼저 확인하고 쓰라는 뜻이다. */
-/* ⚠ 기본은 끔.
-   프레임 끊김을 잡으려고 기본 켬으로 바꿨다가(d638f22) 내보내기가 정확히 절반으로
-   느려졌다. 같은 MP4·같은 프로젝트로 켜고 끄기만 바꿔 4회 측정:
-       켬  0.94 · 0.94 배속
-       끔  1.91 · 1.86 배속
-   붙은 디코더가 내보내기 도중 떨어져 나가면서(그림 검증·자동 복귀) 붙이는 비용과
-   <video> 를 다시 깨우는 비용을 둘 다 물기 때문이다. 끊김도 그대로였다.
-   원인(편집 목록 elst 미처리로 의심)을 실제 파일에서 잡기 전까지는 꺼 둔다.
-   내보내기 패널의 「⚡ 직접 디코딩」으로 파일별로 시험해 볼 수는 있다. */
-let WC_ON=false;
+/* 직접 디코딩 — <video> 를 재생시켜 화면을 긁는 대신, 컨테이너를 뜯어 압축 패킷을
+   VideoDecoder 에 바로 먹인다. '재생 속도'라는 제약이 사라져 빠르고, 프레임을
+   시각으로 집어 오므로 정확하다.
+   앱 실제 코드로 잰 값(640x360 MP4 150프레임, 인코더 대기 8ms 흉내):
+     30fps 출력  <video> 1.68배속·틀린 프레임 4장  →  직접 1.68→3.21배속·0장
+     60fps 출력  <video> 1.46배속               →  직접 1.59배속
+   안 되는 파일은 조용히 예전 방식으로 남는다:
+     조각난 MP4(화면 녹화·일부 카메라)는 표본표가 없어 못 읽고,
+     붙기 전에 <video> 그림과 맞대어 보아 다르면 버리고(verifyVidDec),
+     한 장에 200ms 넘는 일이 세 번 이어지면 그 소스만 예전 방식으로 돌린다. */
+let WC_ON=true;
 /* 소스에 디코더를 붙인다 — 안 되는 파일이면 조용히 예전 방식으로 남는다 */
 async function attachVidDec(a){
   if(a.wcDec && !a.wcDec.dead) return a.wcDec;
@@ -8074,6 +8068,13 @@ function vfStart(a, cw, ch){
   };
   try{ v.requestVideoFrameCallback(step); }catch(e){ a.vfOn=false; }
 }
+/* 필요할 때 펌프를 켠다 — 직접 디코딩이 도중에 떨어져 나가면 여기서 이어받는다 */
+function vfEnsure(a){
+  if(a.vfOn || a.vfDead || !a.vfW) return;
+  if(!a.videoEl.requestVideoFrameCallback){ a.vfDead=true; return; }
+  vfStart(a, a.vfW, a.vfH);
+  if(!a.vfOn) a.vfDead=true;
+}
 function vfStop(a){ a.vfOn=false; a.wantCb=null; a.bufs=null; a.bgs=null; a.bms=null; a.capM=null; }
 function vfGrab(a){                       /* 탐색 직후처럼 확실한 순간에 한 장 담는다 */
   if(!a.bufs) return null;
@@ -8143,6 +8144,7 @@ function advanceVideosBegin(t){
          남은 구간 내내 예전 <video> 방식으로 돌린다. */
       waits.push(a.wcDec.frameAt(st).then(f=>{
         if(!f || a.wcDec.tooSlow){        /* 못 받거나 느려지면 이 소스는 예전 방식으로 */
+          a.wcOff = f? '느려서 중단' : '프레임 못 받음';
           try{ a.wcDec.close(); }catch(e){}
           a.wcDec=null; a.wcFrame=null;
         }else a.wcFrame=f;
@@ -8203,6 +8205,7 @@ function advanceVideosSettle(){
     if(a.wcDec && !a.wcDec.dead) continue;
     const st=a.vfSt; if(st==null) continue;
     const v=a.videoEl;
+    vfEnsure(a);
     if(!a.vfOn){                       /* requestVideoFrameCallback 이 없는 브라우저 */
       waits.push(waitVideoTime(v, st, 400).then(()=>{
         const d=v.currentTime-st;
@@ -8212,7 +8215,7 @@ function advanceVideosSettle(){
     }
     const p=vfWait(a, st, 400);
     const fin=()=>{
-      if(a.vfMiss>=3){ a.vfOn=false; a.wcFrame=null; return; }   /* 프레임이 안 올라오는 환경 */
+      if(a.vfMiss>=3){ a.vfOn=false; a.vfDead=true; a.wcFrame=null; return; }   /* 프레임이 안 올라오는 환경 */
       const pk=vfPick(a, st);
       if(pk.bi<0 || pk.off>.34 || pk.off<-.34){                  /* 너무 어긋났다 → 탐색 1회 */
         v.pause();
@@ -12239,7 +12242,8 @@ async function startExport(){
       exFps=FPS; await measureVidHz();
       for(const a of list){
         const sc=Math.min(1, Math.max(W,H)*1.3/Math.max(1,a.width,a.height));
-        vfStart(a, Math.round(a.width*sc), Math.round(a.height*sc));
+        a.vfW=Math.round(a.width*sc); a.vfH=Math.round(a.height*sc); a.vfDead=false; a.wcOff=null;
+        if(!a.wcDec) vfEnsure(a);      /* 직접 디코딩이 붙은 소스는 필요할 때 만든다 */
       }
     }
     /* QMAX는 위에서 인코더 프로브와 같은 값으로 이미 정했다 */
@@ -12367,7 +12371,7 @@ async function startExport(){
             for(const [,a2] of state.assets){
               if(a2.kind!=='video') continue;
               parts.push(`${a2.width||'?'}×${a2.height||'?'} `+(a2.wcDec? '직접디코딩'
-                       : '재생'+(a2.wcSkip? `(${a2.wcSkip})` : WC_ON? '(조건 불충족)' : '(스위치 꺼짐)')));
+                       : '재생'+(a2.wcOff? `(${a2.wcOff})` : a2.wcSkip? `(${a2.wcSkip})` : WC_ON? '(조건 불충족)' : '(스위치 꺼짐)')));
             }
             /* 지금 이 순간 실제로 그려지는 영상 컷 수 — 겹쳐 있으면 그만큼 디코딩이 늘어난다 */
             let act=0;
