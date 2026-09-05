@@ -4195,6 +4195,10 @@ function renderTL(){
   drawRuler(durS);
   tlTracksEl.innerHTML='';
   for(const tr of state.tracks){
+    /* 번역(S2) 트랙은 타임라인에 줄을 만들지 않는다 — 번역 가사는 여기 클립에서
+       그대로 읽어 가므로(리릭 비디오·자막 렌더러) 트랙 자체는 남겨 둔다.
+       번역은 자막 탭에서 넣고 고친다. */
+    if(tr.role==='tr') continue;
     const row=document.createElement('div');
     row.className='tlTrack'+((tr.kind==='sub'||tr.kind==='over')?' small':'');
     const head=document.createElement('div'); head.className='tlHead';
