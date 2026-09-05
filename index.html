@@ -8023,7 +8023,101 @@ function waitVideoTime(v, st, deadlineMs){
     tick();
   });
 }
-async function advanceVideosTo(t){
+
+/* ── 소스 프레임 붙잡기 ──────────────────────────────────────────────
+   <video> 의 currentTime 은 '재생 시계'라서 실제로 화면에 올라온 프레임보다
+   앞서 있고, 그 차이가 프레임마다 들쭉날쭉하다(실측 0.6~0.9프레임, 편차 1프레임↑).
+   그 시계를 기준으로 그리면 같은 프레임이 두 번 나오거나 한 장이 통째로 빠져
+   결과물이 뚝뚝 끊긴다. requestVideoFrameCallback 이 알려 주는 mediaTime 은
+   그 순간 그려지는 프레임과 정확히 일치하므로(실측 확인), 올라오는 프레임을
+   그때그때 복사해 두고 「그 시각에 화면에 떠 있어야 할 프레임」을 골라 그린다.
+   프레임 길이를 추정하지 않으므로 가변 프레임률 영상에도 그대로 맞는다. */
+const VF_BUF=3;                 /* 고르는 사이 덮어쓰이지 않게 세 장 돌려 쓴다 */
+let vidHz=0;                    /* 화면 주사율 — 소스가 1초에 넘겨줄 수 있는 프레임 수 */
+let exFps=30;                   /* 내보내기 출력 프레임수 */
+function measureVidHz(){
+  if(vidHz) return Promise.resolve(vidHz);
+  return new Promise(res=>{
+    let n=0,t0=0;
+    const f=ts=>{ if(!t0)t0=ts; n++;
+      if(n<24) requestAnimationFrame(f);
+      else{ const hz=Math.round(1000/((ts-t0)/(n-1)));
+            vidHz=(hz>=20&&hz<=400)? hz : 60; res(vidHz); } };
+    requestAnimationFrame(f);
+    setTimeout(()=>{ if(!vidHz) vidHz=60; res(vidHz); }, 900);
+  });
+}
+function vfStart(a, cw, ch){
+  const v=a.videoEl;
+  if(a.vfOn) return;
+  if(!v.requestVideoFrameCallback){ a.vfOn=false; return; }
+  a.vfOn=true; a.capM=null; a.wantT=null; a.wantCb=null; a.vfMiss=0;
+  a.srcFps=0; a.wm0=null; a.wn=0; a.bi=0;
+  a.bufs=[]; a.bgs=[]; a.bms=[];
+  for(let i=0;i<VF_BUF;i++){ const c=document.createElement('canvas');
+    c.width=Math.max(2,cw); c.height=Math.max(2,ch);
+    a.bufs.push(c); a.bgs.push(c.getContext('2d',{alpha:false})); a.bms.push(-1); }
+  const step=(now,md)=>{
+    if(!a.vfOn) return;
+    const m=(md&&md.mediaTime!=null)? md.mediaTime : v.currentTime;
+    /* 소스의 초당 프레임 수 — 콜백 수 ÷ 흘러간 미디어 시간. 배속이 높아 프레임이
+       빠지면 낮게 나오므로 지금까지의 최댓값을 쓴다. */
+    if(a.wm0==null || m<a.wm0){ a.wm0=m; a.wn=0; }
+    a.wn++;
+    if(m-a.wm0>.5){ const f=a.wn/(m-a.wm0);
+      if(f>5 && f<130 && f>a.srcFps) a.srcFps=f; a.wm0=m; a.wn=0; }
+    a.bi=(a.bi+1)%VF_BUF;
+    try{ const c=a.bufs[a.bi]; a.bgs[a.bi].drawImage(v,0,0,c.width,c.height); a.bms[a.bi]=m; a.capM=m; }
+    catch(e){ a.bms[a.bi]=-1; }
+    if(a.wantCb && m>a.wantT){ const cb=a.wantCb; a.wantCb=null; cb(); }
+    try{ v.requestVideoFrameCallback(step); }catch(e){ a.vfOn=false; }
+  };
+  try{ v.requestVideoFrameCallback(step); }catch(e){ a.vfOn=false; }
+}
+function vfStop(a){ a.vfOn=false; a.wantCb=null; a.bufs=null; a.bgs=null; a.bms=null; a.capM=null; }
+function vfGrab(a){                       /* 탐색 직후처럼 확실한 순간에 한 장 담는다 */
+  if(!a.bufs) return null;
+  const v=a.videoEl, m=v.currentTime;
+  for(let i=0;i<VF_BUF;i++) a.bms[i]=-1;
+  a.bi=0;
+  try{ const c=a.bufs[0]; a.bgs[0].drawImage(v,0,0,c.width,c.height); a.bms[0]=m; a.capM=m; return c; }
+  catch(e){ return null; }
+}
+function vfWait(a, st, ms){
+  if(a.capM!=null && a.capM>st) return null;   /* st 다음 프레임이 이미 와 있다 */
+  return new Promise(res=>{ let done=false;
+    const fin=to=>{ if(done)return; done=true; a.wantCb=null;
+      if(to) a.vfMiss++; else a.vfMiss=0; res(); };
+    a.wantT=st; a.wantCb=()=>fin(false);
+    const t0=performance.now();
+    /* 마감은 setTimeout 이 아니라 폴링으로 — 숨은 탭에서 setTimeout 은 1초로 묶인다 */
+    const poll=()=>{ if(done) return;
+      if(performance.now()-t0>ms) return fin(true);
+      yieldTask().then(poll); };
+    poll();
+  });
+}
+function vfPick(a, st){                   /* st 이하 중 가장 최근 = 그 시각의 그림 */
+  let bi=-1, best=-1e9;
+  for(let i=0;i<VF_BUF;i++){ const m=a.bms[i];
+    if(m>=0 && m<=st+1e-6 && m>best){ best=m; bi=i; } }
+  if(bi>=0) return {bi, off:st-best};
+  let nb=-1, nm=1e9;                      /* 전부 앞서 있으면 가장 이른 것 */
+  for(let i=0;i<VF_BUF;i++){ const m=a.bms[i]; if(m>=0 && m<nm){ nm=m; nb=i; } }
+  return {bi:nb, off: nb<0? 1e9 : st-nm};
+}
+/* 화면이 1초에 올려 주는 프레임 수의 절반을 넘겨 소스를 돌리면 필요한 프레임이
+   아예 안 올라와 통째로 빠진다 — 실측(120Hz·30fps 출력):
+     상한 없음 3.4배속 · 건너뜀 12~16장
+     70%      2.7배속 · 건너뜀 20~23장
+     50%      2.0배속 · 건너뜀 0장 (세 번 모두 똑같은 결과)                */
+function vfRateCap(a, speed){
+  const need=Math.max(1, Math.min(a.srcFps||30, (exFps||30)/Math.max(.05,speed)));
+  return Math.max(1, (vidHz||60)*.5/need);
+}
+
+let vidActive=new Map();          /* 지금 그려질 컷 (소스당 하나) */
+function advanceVideosBegin(t){
   const waits=[], pace=vidPace(t);
   /* 같은 소스 파일을 여러 컷이 나눠 쓰는 건 흔한 구성이다. 컷마다 따로 제어하면
      비활성 컷이 매 프레임 그 요소를 정지시켜 활성 컷과 싸우게 되고, 정지·재생이
@@ -8038,6 +8132,7 @@ async function advanceVideosTo(t){
   eachVideoClip((c,tr,a)=>{                            /* 아무 컷도 안 쓰는 소스만 정지 */
     if(!act.has(a)){ if(!a.videoEl.paused) a.videoEl.pause(); a.wcFrame=null; }
   });
+  vidActive=act;
   for(const [a,c] of act){
     /* 파일을 직접 뜯어 디코딩하는 경로가 붙어 있으면 그쪽에서 프레임을 받는다.
        재생 속도에 묶이지 않고 프레임이 정확하다(실측 120프레임 중 고유 65 → 120). */
@@ -8056,23 +8151,28 @@ async function advanceVideosTo(t){
     }
     const v=a.videoEl;
     const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
+    a.vfSt=st;
     const cur=v.currentTime, drift=st-cur;
     if(drift<-.1 || drift>1.5){         /* 큰 되감기·컷 경계 점프(복제 클립 되감기 등) → 탐색 1회 */
       if(!v.paused) v.pause();
-      waits.push(seekVideo(v,st));
+      a.vfSt=null;
+      waits.push(seekVideo(v,st).then(()=>{ if(a.vfOn) a.wcFrame=vfGrab(a); }));
       continue;
     }
     if(a.noPlay){                        /* 재생이 정말 막힌 소스만 — 탐색으로 따라가되 재생 복구를 계속 시도 */
       if(v.paused){ const pr=v.play();
         if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(e=>{ if(e&&e.name!=='AbortError') a.noPlay=true; }); }
-      if(Math.abs(v.currentTime-st)>VID_FIX_TOL) waits.push(seekVideo(v,st));
+      a.vfSt=null;
+      if(Math.abs(v.currentTime-st)>VID_FIX_TOL) waits.push(seekVideo(v,st).then(()=>{ if(a.vfOn) a.wcFrame=vfGrab(a); }));
+      else if(a.vfOn) a.wcFrame=vfGrab(a);
       continue;
     }
     /* 많이 앞섰으면 정지해 따라오기를 기다린다. 감속만 하면 내보내기가 실시간보다
        느릴 때 소스가 계속 앞질러 매 프레임 재탐색이 일어난다(초기 구현의 실패 원인). */
     if(drift <= -VID_BEHIND_SEEK){         /* 많이 앞질렀다(컷 경계 등) → 되돌려 맞춘다 */
       if(!v.paused) v.pause();
-      waits.push(seekVideo(v,st));
+      a.vfSt=null;
+      waits.push(seekVideo(v,st).then(()=>{ if(a.vfOn) a.wcFrame=vfGrab(a); }));
       continue;
     }
     /* 소스 배속을 「진행 속도 + 어긋난 만큼」으로 잡는다.
@@ -8088,24 +8188,45 @@ async function advanceVideosTo(t){
        한때 '느려지면 못 올라온다'며 최소 기준(2배)으로 밀어 주는 보정을 넣었는데,
        체감상 빨라지지도 않고 소스가 앞질렀다 멈추기를 반복해 결과물이 끊길 수 있어
        사용자 요청으로 되돌렸다. */
-    v.playbackRate=clamp(pace*need*corr, .1, VID_RATE_MAX);
+    const rmax=a.vfOn? Math.min(VID_RATE_MAX, vfRateCap(a,need)) : VID_RATE_MAX;
+    v.playbackRate=clamp(pace*need*corr, .1, rmax);
     if(v.paused){ const pr=v.play();      /* 순차 디코딩 재생. AbortError(탐색이 play를 끊음)는 정상이라 무시 */
       if(pr&&pr.then) pr.then(()=>{a.noPlay=false;}).catch(e=>{ if(e&&e.name!=='AbortError') a.noPlay=true; }); }
-    /* 타임아웃되면 그냥 이전 프레임을 쓰고 넘어갔었다 — 소스가 못 따라오는 구간마다
-       같은 프레임이 반복돼 결과물이 버벅였다. 두 프레임 넘게 처졌으면 탐색 1회로 따라잡는다. */
-    /* 기다린 뒤에도 어긋나 있으면 그 자리에서 바로잡는다. 대기 중에 소스가 계속
-       돌기 때문에 앞뒤 양쪽으로 벌어질 수 있는데, 예전엔 그대로 그려서 결과물이 튀었다. */
-    waits.push(waitVideoTime(v, st, 400).then(()=>{
-      const d=v.currentTime-st;
-      /* 처졌으면 기다렸는데도 못 왔다는 뜻이라 탐색으로 맞춘다.
-         앞선 쪽은 한 프레임 반까지 그냥 쓴다 — 예전엔 0.017초만 앞서도 탐색했는데,
-         내보내기가 실시간보다 느리면 소스는 늘 조금 앞서 있어서 프레임마다 탐색이
-         걸렸다. 4K 한 번에 150ms 씩이니 그것만으로 0.1배속이 된다.
-         ended 라고 건너뛰면 안 된다 — 배속 재생이 소스 끝을 지나친 경우가 그 상태다. */
-      if(d < -VID_FIX_TOL || d > VID_AHEAD_OK){ v.pause(); return seekVideo(v, st); }
-    }));
   }
-  if(waits.length) await Promise.all(waits);
+  return waits.length? Promise.all(waits) : null;
+}
+/* 그릴 직전에 「그 시각의 프레임」을 확정한다. 인코더 대기와 겹쳐 두면 그 사이에
+   소스가 더 흘러가 엉뚱한 프레임이 그려지므로, 확정은 반드시 마지막에 한다. */
+function advanceVideosSettle(){
+  const waits=[];
+  for(const [a,c] of vidActive){
+    if(a.wcDec && !a.wcDec.dead) continue;
+    const st=a.vfSt; if(st==null) continue;
+    const v=a.videoEl;
+    if(!a.vfOn){                       /* requestVideoFrameCallback 이 없는 브라우저 */
+      waits.push(waitVideoTime(v, st, 400).then(()=>{
+        const d=v.currentTime-st;
+        if(d < -VID_FIX_TOL || d > VID_AHEAD_OK){ v.pause(); return seekVideo(v, st); }
+      }));
+      continue;
+    }
+    const p=vfWait(a, st, 400);
+    const fin=()=>{
+      if(a.vfMiss>=3){ a.vfOn=false; a.wcFrame=null; return; }   /* 프레임이 안 올라오는 환경 */
+      const pk=vfPick(a, st);
+      if(pk.bi<0 || pk.off>.34 || pk.off<-.34){                  /* 너무 어긋났다 → 탐색 1회 */
+        v.pause();
+        return seekVideo(v, st).then(()=>{ a.wcFrame=vfGrab(a); });
+      }
+      a.wcFrame=a.bufs[pk.bi];
+    };
+    waits.push(p? p.then(fin) : Promise.resolve().then(fin));
+  }
+  return waits.length? Promise.all(waits) : null;
+}
+async function advanceVideosTo(t){
+  const p=advanceVideosBegin(t); if(p) await p;
+  const q=advanceVideosSettle(); if(q) await q;
 }
 
 function play(){
@@ -8497,7 +8618,7 @@ function drawMediaClip(c,t,fx,p){
   if(c.tx.rot) g.rotate(c.tx.rot*Math.PI/180);
   /* 파일 안에 회전이 적혀 있는 영상(폰으로 세로 촬영 등) — <video> 는 알아서 돌려 주지만
      디코더가 낸 VideoFrame 은 안 돌아가 있으므로 여기서 돌린다. */
-  const vrot=(a.wcFrame && a.wcRot)? a.wcRot : 0;
+  const vrot=(a.wcFrame && a.wcRot && a.wcDec)? a.wcRot : 0;
   const put=(im,rot)=>{
     if(rot){
       g.save(); g.rotate(rot*Math.PI/180);
@@ -12113,6 +12234,13 @@ async function startExport(){
         : '';
       if(all) setStatus(`영상 소스 ${all}개 — 직접 디코딩 ${wc}개`
                         + (wc<all? ` · 기존 방식 ${all-wc}개`:'') + ' — 인코딩을 시작합니다…');
+      /* 소스 프레임을 정확히 골라 쓰기 위한 준비 — 올라오는 프레임을 담아 둘 자리.
+         출력보다 크게 담을 이유가 없으니(어차피 줄여 그린다) 거기에 맞춰 줄인다. */
+      exFps=FPS; await measureVidHz();
+      for(const a of list){
+        const sc=Math.min(1, Math.max(W,H)*1.3/Math.max(1,a.width,a.height));
+        vfStart(a, Math.round(a.width*sc), Math.round(a.height*sc));
+      }
     }
     /* QMAX는 위에서 인코더 프로브와 같은 값으로 이미 정했다 */
 
@@ -12182,13 +12310,14 @@ async function startExport(){
         /* 영상 소스 전진을 먼저 걸어 두고 인코더 백프레셔 대기와 겹친다.
            둘을 순서대로 기다리면 프레임당 8ms(소스 디코딩)+13ms(인코더)가 더해져
            인코더 상한보다 느려진다. 겹치면 둘 중 큰 쪽만 든다. */
-        const vidP = hasVideoClips? advanceVideosTo(t) : null;
+        const vidP = hasVideoClips? advanceVideosBegin(t) : null;
         const bw0=performance.now();
         while(vEnc.encodeQueueSize>QMAX && !state.cancelRender && !encErr && performance.now()-bw0<10000)
           await encWait(vEnc);
         const bw1=performance.now(); tmWait+=bw1-bw0;
         if(bw1-bw0>9900) capHits++;          /* 10초 상한에 걸린 프레임 수 */
         if(vidP) await vidP;
+        if(hasVideoClips){ const sp=advanceVideosSettle(); if(sp) await sp; }
         const bw2=performance.now(); tmVid+=bw2-bw1;
         computeSpectrum(specSrc, clamp(t-from, 0, span-.02));
         drawFrame(t, true, rg, W, H, false);
@@ -12340,6 +12469,7 @@ async function startExport(){
     for(const a of state.assets.values()){
       if(a.wcDec){ try{ a.wcDec.close(); }catch(e){} }
       a.wcDec=null; a.wcFrame=null;      /* wcTrack 은 남겨 둔다 (다음 내보내기에서 재사용) */
+      if(a.vfOn||a.bufs) vfStop(a);
     }
     pauseAllVideos();                 /* 순차 재생으로 돌린 소스를 반드시 멈춘다 */
     eachVideoClip((c,tr,a)=>{ a.videoEl.playbackRate=1; });
