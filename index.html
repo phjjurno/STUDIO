@@ -975,6 +975,11 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <input type="checkbox" id="shHold" checked> 영상 끝까지 띄우기 <small class="usuf">(끄면 3초)</small></label>
       <label class="row" id="shBand2Wrap" style="margin-top:4px;gap:6px;align-items:center;cursor:pointer;font-size:12px;color:var(--dim)">
         <input type="checkbox" id="shBand2" checked> 반대쪽도 검정 띠 <small class="usuf">(위아래로 감싸 가운데 집중)</small></label>
+      <div class="row" id="shBandOpWrap" style="margin-top:4px;gap:6px;align-items:center;font-size:12px;color:var(--dim)">
+        <span style="min-width:52px">띠 투명도</span>
+        <input type="range" id="shBandOp" min="0" max="100" value="100" style="flex:1">
+        <b id="shBandOpV" style="min-width:38px;text-align:right">100%</b>
+      </div>
       <div id="shPrev" class="shprev"><span></span></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
       <div class="row" style="margin-top:8px;gap:6px;align-items:center">
@@ -8923,6 +8928,9 @@ function wrapLines(g, text, maxW){
   _wrapCache.set(key,res);
   return res;
 }
+/* 배너 띠가 화면 끝에서 비워 두는 안전 여백 — 휴대폰 쇼츠는 위에 앱 UI·노치가,
+   아래에 제목·버튼이 겹친다. 그리기와 끌어 조절하기가 같은 값을 봐야 한다. */
+const BAND_SAFE_T=.085, BAND_SAFE_B=.13;
 /* 배너용 두 줄 나누기 — 글자 수가 가장 고르게 갈리는 띄어쓰기에서 끊습니다
    (같으면 앞줄을 길게 둬서 뒷줄이 더 크게 강조되도록) */
 function splitBalanced(text){
@@ -9045,22 +9053,28 @@ function paintOverlay(c, lt, alpha){
         /* 검은 띠는 가로 전체 + 가까운 가장자리에 딱 붙지만, 글자는 안전 여백만큼
            안쪽으로 들여 놓는다. 휴대폰 쇼츠는 위에 앱 UI·노치가, 아래에 제목·버튼이
            겹쳐서 화면 끝에 붙은 글자가 잘려 보였다. 띠 자체는 끝까지 채워 인상은 유지. */
-        const SAFE_T=h*.085, SAFE_B=h*.13;
-        const bandH=totH+padY*2;
-        let bandTop, bandBot, textTop;
-        if(c.tx.y<=.5){ bandTop=0; bandBot=SAFE_T+bandH; textTop=SAFE_T; }
-        else { bandBot=h; bandTop=h-(SAFE_B+bandH); textTop=bandTop; }
+        const SAFE_T=h*BAND_SAFE_T, SAFE_B=h*BAND_SAFE_B;
+        /* 띠 높이 — 미리보기에서 안쪽 가장자리를 끌어 조절한 값이 있으면 그걸 쓴다.
+           글자보다 작아지지는 않는다. */
+        const bandH=(c.obandH!=null)? Math.max(totH, clamp(c.obandH,.02,.6)*h) : totH+padY*2;
+        const atTop=(c.tx.y<=.5);
+        let bandTop, bandBot, in0, in1;
+        if(atTop){ bandTop=0; bandBot=SAFE_T+bandH; in0=SAFE_T; in1=bandBot; }
+        else { bandBot=h; bandTop=h-(SAFE_B+bandH); in0=bandTop; in1=h-SAFE_B; }
         g.save(); g.shadowBlur=0; g.shadowOffsetY=0;
+        /* 띠만 투명해진다 — 글자는 그대로 또렷하게 남는다 */
+        g.globalAlpha=clamp(alpha,0,1)*(c.obandOp==null? 1 : clamp(c.obandOp,0,1));
         g.fillStyle=c.oband||'#000000';
         g.fillRect(0, bandTop, w, bandBot-bandTop);
-        /* 반대쪽에도 같은 높이의 띠 — 위아래로 감싸서 가운데에 시선이 모이게 */
+        /* 반대쪽에도 띠 — 위아래로 감싸서 가운데에 시선이 모이게 */
+        let b2Top=null, b2H=0;
         if(c.oband2!==false){
-          const bh2=Math.min(bandH, h*.22);
-          if(c.tx.y<=.5) g.fillRect(0, h-bh2, w, bh2);
-          else g.fillRect(0, 0, w, bh2);
+          b2H=(c.obandH2!=null)? clamp(c.obandH2,0,.6)*h : Math.min(bandH, h*.22);
+          b2Top = atTop? (h-b2H) : 0;
+          g.fillRect(0, b2Top, w, b2H);
         }
         g.restore();
-        let cy=textTop+padY;
+        let cy=in0+((in1-in0)-totH)/2;      /* 글자는 띠 안쪽 가운데 */
         lines.forEach((L,i)=>{ const fz=sizes[i]; cy+=fz*.94;
           const base=(i===0? col : (c.oink2||'#FFFFFF'));
           /* 강조가 줄 색과 같으면 안 보이므로 반대쪽 색을 쓴다 */
@@ -9068,7 +9082,11 @@ function paintOverlay(c, lt, alpha){
           emFill(g, segsOf[i], x, cy, setF, fz, base, accent);
           cy+=fz*.24+gap; });
         g.restore();
-        if(R.preview && c.id) HIT.push({id:'ov:'+c.id, x:0, y:bandTop, w, h:bandBot-bandTop});
+        if(R.preview && c.id){
+          HIT.push({id:'ov:'+c.id, x:0, y:bandTop, w, h:bandBot-bandTop});
+          /* 반대쪽 띠는 옮기는 대상이 아니라 높이만 잡는다 */
+          if(b2Top!=null && b2H>2) HIT.push({id:'ovb:'+c.id, x:0, y:b2Top, w, h:b2H, noMove:true});
+        }
         return;
       }
       /* 배경/하이라이트 */
@@ -9815,7 +9833,31 @@ const RESIZE={
     after:()=>{ setSlider('waveSW','waveSWV',Math.round(state.el.wave.sw*100));
                 setSlider('waveSH','waveSHV',Math.round(state.el.wave.sh*100)); } },
 };
+/* 배너 띠 — 안쪽 가장자리를 끌면 높이가 따라온다(비율이 아니라 그 자리로 바로).
+   opp=true 면 반대쪽 띠. */
+function bandSpec(c, opp){
+  const H=canvas.height;
+  const onTop = opp? (c.tx.y>.5) : (c.tx.y<=.5);
+  return { edge:true, edges:[onTop? 's' : 'n'],
+    setEdge:py=>{
+      if(opp) c.obandH2=clamp(onTop? py/H : (H-py)/H, 0, .6);
+      else    c.obandH =clamp(onTop? (py-H*BAND_SAFE_T)/H : (H-H*BAND_SAFE_B-py)/H, .02, .6);
+    } };
+}
+function resizeSpec(id){
+  if(!id) return null;
+  if(RESIZE[id]) return RESIZE[id];
+  if(id.startsWith('ov:')||id.startsWith('ovb:')){
+    const r=clipById(id.slice(id.indexOf(':')+1));
+    if(r && (r.c.ostyle||'plain')==='banner') return bandSpec(r.c, id.startsWith('ovb:'));
+  }
+  return null;
+}
 function handleList(hb,spec){
+  if(spec.edge){                       /* 위아래 한쪽만 — 가로는 늘 화면 전체다 */
+    const MX=hb.x+hb.w/2;
+    return spec.edges.map(k=> k==='s'? {k,x:MX,y:hb.y+hb.h} : {k,x:MX,y:hb.y});
+  }
   const L=hb.x, Rt=hb.x+hb.w, T=hb.y, B=hb.y+hb.h;
   const MX=hb.x+hb.w/2, MY=hb.y+hb.h/2;
   const out=[{k:'nw',x:L,y:T},{k:'ne',x:Rt,y:T},{k:'sw',x:L,y:B},{k:'se',x:Rt,y:B}];
@@ -9824,7 +9866,7 @@ function handleList(hb,spec){
 }
 const handleR=()=>Math.max(7, canvas.width*.008);
 function handleAt(p,id){
-  const spec=RESIZE[id]; if(!spec) return null;
+  const spec=resizeSpec(id); if(!spec) return null;
   const hb=HIT.find(b=>b.id===id); if(!hb) return null;
   const r=handleR()*1.5;
   for(const h of handleList(hb,spec))
@@ -9882,7 +9924,7 @@ function drawHover(){
   g.setLineDash([w*.008,w*.006]);
   roundRect(g,hb.x,hb.y,hb.w,hb.h,w*.006); g.stroke();
   /* 크기 조절 손잡이 — 끄는 중에는 옮기는 쪽만 남긴다 */
-  const spec=RESIZE[id];
+  const spec=resizeSpec(id);
   if(spec && !cvDrag){
     g.setLineDash([]);
     const s2=handleR();
@@ -9913,12 +9955,13 @@ canvas.addEventListener('pointerdown',e=>{
   if(state.playing||state.rendering) return;
   const p=toCanvasPos(e);
   /* ① 손잡이를 잡았으면 크기 조절 */
-  if(hoverId && RESIZE[hoverId]){
+  if(hoverId && resizeSpec(hoverId)){
     const k=handleAt(p,hoverId);
     if(k){
       e.preventDefault(); canvas.setPointerCapture(e.pointerId);
       markUndo();
-      const box=HIT.find(b=>b.id===hoverId), spec=RESIZE[hoverId];
+      const box=HIT.find(b=>b.id===hoverId), spec=resizeSpec(hoverId);
+      if(spec.edge){ cvSize={id:hoverId, k, spec}; canvas.style.cursor='ns-resize'; return; }
       const cx=box.x+box.w/2, cy=box.y+box.h/2;
       cvSize={ id:hoverId, k, spec, cx, cy,
                d0x:Math.max(1,Math.abs(p.x-cx)), d0y:Math.max(1,Math.abs(p.y-cy)),
@@ -9929,7 +9972,7 @@ canvas.addEventListener('pointerdown',e=>{
     }
   }
   const hb=hitAt(p);
-  if(!hb) return;
+  if(!hb || hb.noMove) return;
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   let ax,ay;
@@ -9959,6 +10002,7 @@ canvas.addEventListener('pointermove',e=>{
   if(cvSize){
     e.preventDefault();
     const S=cvSize, sp=S.spec;
+    if(sp.edge){ sp.setEdge(p.y); drawFrame(state.time,false); return; }
     const dx=Math.abs(p.x-S.cx), dy=Math.abs(p.y-S.cy);
     const near1=v=>Math.abs(v-1)<.04? 1 : v;      /* 100% 근처면 딱 맞춰 준다 */
     if(sp.uniform){
@@ -9998,7 +10042,7 @@ canvas.addEventListener('pointermove',e=>{
   let nh=hb? hb.id : null;
   /* 손잡이는 상자 밖 모서리에 걸쳐 있다 — 근처에 있으면 선택을 놓지 않는다 */
   let hk=null;
-  if(hoverId && RESIZE[hoverId]){ hk=handleAt(p,hoverId); if(hk) nh=hoverId; }
+  if(hoverId && resizeSpec(hoverId)){ hk=handleAt(p,hoverId); if(hk) nh=hoverId; }
   if(nh!==hoverId){ hoverId=nh; drawFrame(state.time,false); }
   canvas.style.cursor = hk? (CURSOR[hk]||'nwse-resize') : nh? 'grab' : 'default';
 });
@@ -11006,12 +11050,12 @@ const HK_STYLES=[['banner','썸네일 배너'],['pop','팝아웃'],['neon','네�
                  ['grad','그라디언트'],['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
-const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true, band2:true};
+const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true, band2:true, bandOp:1};
 /* 후킹 문구 세로 위치 — 휴대폰 쇼츠 상단은 앱 UI·노치가 덮어서 0.16은 잘려 보였다 */
 const HOOK_Y=0.24;
 function hookExtra(){ return {ohook:true, ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
   ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:hookSty.sub, oband:'#000000', oband2:hookSty.band2,
-  ostyle:hookSty.style, oanim:hookSty.anim}; }
+  obandOp:hookSty.bandOp, ostyle:hookSty.style, oanim:hookSty.anim}; }
 function renderHookStyle(){
   const sr=$('shStyleRow'), cr=$('shColorRow'), ar=$('shAnimRow'); if(!sr) return;
   const mk=(box,list,cur,set,paint)=>{ box.innerHTML='';
@@ -11027,7 +11071,10 @@ function renderHookStyle(){
   const isBanner=hookSty.style==='banner';
   $('shColor2Wrap').style.display=isBanner?'':'none';
   $('shBand2Wrap').style.display=isBanner?'':'none';
+  if($('shBandOpWrap')) $('shBandOpWrap').style.display=isBanner?'':'none';
   if($('shBand2')) $('shBand2').checked=hookSty.band2;
+  if($('shBandOp')){ const bv=Math.round(hookSty.bandOp*100);
+    $('shBandOp').value=bv; $('shBandOpV').textContent=bv+'%'; }
   $('shColorLab').textContent=isBanner?'윗줄':'색';
   const fsel=$('shFont');
   if(fsel && !fsel.options.length)
@@ -11145,6 +11192,8 @@ function addHookOverlay(text, atT, dur){
 }
 $('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); applyHookStyle(); });
 $('shBand2').addEventListener('change',e=>{ hookSty.band2=e.target.checked; applyHookStyle(); });
+$('shBandOp').addEventListener('input',e=>{ hookSty.bandOp=clamp(+e.target.value,0,100)/100;
+  $('shBandOpV').textContent=Math.round(hookSty.bandOp*100)+'%'; applyHookStyle(); });
 $('shColor2Custom').addEventListener('input',e=>{ hookSty.sub=e.target.value; renderHookStyle(); applyHookStyle(); });
 const shSizeStep=d=>{ hookSty.size=clamp(Math.round((hookSty.size*100+d)/5)*5,50,260)/100;
   renderHookStyle(); applyHookStyle(); };
