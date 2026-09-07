@@ -9176,10 +9176,7 @@ function drawLyricVideo(t){
   if(!cs.length) return;
   let idx=-1;
   for(let i=0;i<cs.length;i++) if(t>=cs[i].start && t<clipEnd(cs[i])){ idx=i; break; }
-  if(idx<0){                                  /* 줄 사이 빈 구간 — 다음 줄을 미리 세워 둔다 */
-    for(let i=0;i<cs.length;i++) if(cs[i].start>t){ idx=i; break; }
-    if(idx<0) idx=cs.length-1;
-  }
+  const active=(idx>=0);
   const {g,w,h}=R, portrait=h>w;
   /* 「자막 스타일 따르기」를 켜면 폰트·색을 자막 설정에서 그대로 가져온다 */
   const US=LV.useSubStyle? (state.subStyle||null) : null;
@@ -9191,19 +9188,20 @@ function drawLyricVideo(t){
   const fsSide=Math.round(fsMain*LV.sideSize);
   const fsTr=Math.round(fsMain*(LV.trSize!=null?LV.trSize:.62));   /* 번역 글자 크기 */
   const cx=LV.x*w, cy=LV.y*h;
-  const active=(t>=cs[idx].start && t<clipEnd(cs[idx]));
-  const lt=active? t-cs[idx].start : 0;
   /* 가사가 없는 구간(간주·곡 끝난 뒤·가사를 안 넣은 곡)에는 아무것도 남기지 않는다.
-     예전에는 다음 줄과 그 앞뒤 줄이 흐리게 떠 있어서 빈 구간이 비어 보이지 않았다.
-     줄 사이 짧은 틈에서 깜빡이지 않도록 0.35초에 걸쳐 빠지고 든다. */
+     방금 끝난 줄만 0.35초에 걸쳐 사라진다 — 다음 줄은 제 시각이 되기 전에는
+     한 글자도 나오지 않는다. 예전에는 빈 구간에서 다음 줄을 미리 세워 두고
+     시작 0.35초 전부터 띄워서, 아직 안 나올 가사가 먼저 보였다. */
   const GAP_FADE=.35;
   let gapFade=1;
   if(!active){
-    let prevEnd=-1e9;
-    for(const c of cs) if(clipEnd(c)<=t && clipEnd(c)>prevEnd) prevEnd=clipEnd(c);
-    const nextStart=(cs[idx].start>t)? cs[idx].start : 1e9;
-    gapFade=Math.max(1-clamp((t-prevEnd)/GAP_FADE,0,1), 1-clamp((nextStart-t)/GAP_FADE,0,1));
+    let pi=-1;
+    for(let i=0;i<cs.length;i++)
+      if(clipEnd(cs[i])<=t && (pi<0 || clipEnd(cs[i])>clipEnd(cs[pi]))) pi=i;
+    if(pi>=0){ idx=pi; gapFade=1-clamp((t-clipEnd(cs[pi]))/GAP_FADE,0,1); }
+    else { idx=0; gapFade=0; }              /* 첫 줄 전 — 아무것도 안 나온다 */
   }
+  const lt=active? t-cs[idx].start : 0;
   const wt=Math.max(700,F.weight);
   const mainFont=`${wt} ${fsMain}px ${F.fam},'Noto Sans KR',sans-serif`;
   const sideFont=`${wt} ${fsSide}px ${F.fam},'Noto Sans KR',sans-serif`;
