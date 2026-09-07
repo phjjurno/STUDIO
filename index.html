@@ -1090,6 +1090,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
     <span class="sep"></span>
     <button id="splitBtn" title="재생 헤드에서 분할 (S)">✂ 분할</button>
     <button id="cutModeBtn" title="가위 — 켜고 클립을 클릭한 자리에서 자릅니다 (C)">✂️ 가위</button>
+    <button id="mergeBtn" title="나뉜 자막을 한 줄로 잇기 (M) — 두 개를 고르거나, 하나만 골라도 바로 뒤와 이어집니다">🔗 합치기</button>
     <button id="dupBtn" title="복제">⧉ 복제</button>
     <button id="delBtn" title="삭제 (Del)">🗑 삭제</button>
     <span class="sep"></span>
@@ -4289,6 +4290,10 @@ function syncTlBar(){
   const has=!!state.sel;
   $('splitBtn').disabled=!has; $('dupBtn').disabled=!has; $('delBtn').disabled=!has;
   const db=$('delBtn'); if(db) db.textContent = n>1? `🗑 삭제 (${n})` : '🗑 삭제';
+  const mb=$('mergeBtn');
+  if(mb){ const s=selClip();
+    mb.disabled = !(s && (s.tr.kind==='sub' || s.tr.kind==='over'));
+    mb.textContent = n>1? `🔗 합치기 (${n})` : '🔗 합치기'; }
 }
 
 /* 스냅 지점 */
@@ -4631,6 +4636,52 @@ function splitSel(){
   state.sel=right.id;
   renderAll();
 }
+/* 나뉜 자막을 한 줄로 잇는다 — 분할의 반대.
+   두 개 이상 골랐으면 그것들을, 하나만 골랐으면 바로 뒤 자막과 잇는다.
+   사이가 떨어져 있어도 잇는다(앞의 시작 ~ 뒤의 끝을 한 덩어리로 삼는다). */
+function mergeSel(){
+  const list=selClipsAll();
+  let tr=null, cs=null;
+  if(list.length>=2){
+    tr=list[0].tr;
+    if(list.some(x=>x.tr!==tr)){ setStatus('같은 트랙에 있는 것끼리만 이을 수 있습니다.'); return; }
+    cs=list.map(x=>x.c).sort((a,b)=>a.start-b.start);
+  }else{
+    const s=selClip();
+    if(!s){ setStatus('이을 자막을 고르세요.'); return; }
+    tr=s.tr;
+    const all=sortedClips(tr), n=all[all.indexOf(s.c)+1];
+    if(!n){ setStatus('뒤에 이을 자막이 없습니다 — 두 개를 골라서 눌러도 됩니다.'); return; }
+    cs=[s.c,n];
+  }
+  if(tr.kind!=='sub' && tr.kind!=='over'){ setStatus('자막·텍스트만 이을 수 있습니다.'); return; }
+  const key = (tr.kind==='over')? 'otext' : 'text';
+  pushUndo();
+  const base=cs[0], start=base.start, end=Math.max(...cs.map(clipEnd));
+  /* 한 줄로 — 안에 있던 줄바꿈도 띄어쓰기로 바꿔 이어 붙인다 */
+  const txt=cs.map(c=>String(c[key]==null? '' : c[key]).replace(/\s+/g,' ').trim())
+              .filter(Boolean).join(' ');
+  /* 글자별 타이밍(가라오케)이 하나라도 있으면 전부 살려서 이어 붙인다 —
+     타이밍이 없던 쪽은 글자 수로 고르게 나눠 채운다. */
+  let words=null;
+  if(key==='text' && cs.some(c=>c.words&&c.words.length)){
+    words=[];
+    for(const c of cs){ const off=c.start-start;
+      const src=(c.words&&c.words.length)? c.words : evenWords(c);
+      for(const w of src) words.push([w[0]+off, w[1]+off, w[2]]);
+    }
+  }
+  base.dur=Math.max(.1, end-start);
+  base[key]=txt;
+  if(words) base.words=words; else delete base.words;
+  base.fadeOut=cs[cs.length-1].fadeOut||0;
+  const drop=new Set(cs.slice(1).map(c=>c.id));
+  tr.clips=tr.clips.filter(c=>!drop.has(c.id));
+  setSelOne(base.id);
+  if(tr.pl) plRepack();
+  renderAll();
+  setStatus(`${cs.length}개를 한 줄로 이었습니다 — 실행 취소(Ctrl+Z)로 되돌릴 수 있어요.`);
+}
 function dupSel(){
   const s=selClip(); if(!s) return;
   pushUndo();
@@ -4757,6 +4808,7 @@ $('cutModeBtn').onclick=()=>{ state.cutMode=!state.cutMode; syncCutUI();
   setStatus(state.cutMode? '가위 켜짐 — 클립에서 자를 자리를 클릭하세요. 한 번 더 누르면 꺼집니다.' : '가위를 껐습니다.'); };
 syncCutUI();
 $('splitBtn').onclick=splitSel; $('dupBtn').onclick=dupSel; $('delBtn').onclick=delSel;
+$('mergeBtn').onclick=mergeSel;
 
 /* 전체 다시 그리기 */
 function renderAll(){
@@ -11521,6 +11573,7 @@ document.addEventListener('keydown',e=>{
   else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); }
   else if(e.key.toLowerCase()==='s'&&!e.ctrlKey&&!e.metaKey){ splitSel(); }
   else if(e.key.toLowerCase()==='c'&&!e.ctrlKey&&!e.metaKey){ $('cutModeBtn').click(); }
+  else if(e.key.toLowerCase()==='m'&&!e.ctrlKey&&!e.metaKey){ mergeSel(); }
   else if(e.key==='ArrowLeft'){ seekTo(state.time-(e.shiftKey?1:1/30)); }
   else if(e.key==='ArrowRight'){ seekTo(state.time+(e.shiftKey?1:1/30)); }
 });
