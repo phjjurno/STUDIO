@@ -3762,7 +3762,7 @@ async function importVideo(f){
   const url=URL.createObjectURL(f);
   const v=document.createElement('video');
   v.muted=true; v.playsInline=true; v.preload='auto'; v.src=url;
-  await withTimeout(new Promise((res,rej)=>{ v.onloadedmetadata=res; v.onerror=()=>rej(new Error('video load')); }),15000,'영상 메타데이터 로드 실패');
+  await loadVideoMeta(v);
   const id=uid();
   const a={id,kind:'video',name:cleanTitle(f.name),blob:f,duration:v.duration,
     width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null,fh:f.__fh||null};
@@ -3810,6 +3810,26 @@ function nextPresentedFrame(v, ms){
     poll();
     try{ v.requestVideoFrameCallback(()=>fin()); }catch(e){ fin(); }
   });
+}
+/* 영상 메타데이터를 읽고 길이를 확정한다.
+   크롬 녹화·이 앱의 실시간 녹화(MediaRecorder)로 만든 webm 은 헤더에 길이가 없어
+   duration 이 Infinity 로 나온다. 그대로 클립 길이가 되면 눈금자 루프가 끝나지 않아
+   탭 전체가 멈췄다. 끝으로 한 번 탐색하면 브라우저가 실제 길이를 채워 준다. */
+async function loadVideoMeta(v, ms=15000){
+  await withTimeout(new Promise((res,rej)=>{
+    if(v.readyState>=1) return res();
+    v.onloadedmetadata=res; v.onerror=()=>rej(new Error('video load'));
+  }), ms, '영상 메타데이터 로드 실패');
+  if(isFinite(v.duration) && v.duration>0) return v.duration;
+  await withTimeout(new Promise(res=>{
+    const chk=()=>{ if(isFinite(v.duration) && v.duration>0){
+      v.removeEventListener('durationchange',chk); v.removeEventListener('seeked',chk); res(); } };
+    v.addEventListener('durationchange',chk); v.addEventListener('seeked',chk);
+    try{ v.currentTime=1e7; }catch(e){ res(); }
+  }), 8000, 'duration').catch(()=>{});
+  try{ v.currentTime=0; }catch(e){}
+  if(!(isFinite(v.duration) && v.duration>0)) throw new Error('영상 길이를 알 수 없습니다');
+  return v.duration;
 }
 let vidSeeks=0;                       /* 내보내기 중 되감기 탐색 횟수 (진단용) */
 function seekVideo(v,t){
@@ -4184,6 +4204,9 @@ function drawRuler(durS){
   ruler.innerHTML='';
   const steps=[.1,.25,.5,1,2,5,10,15,30,60,120,300];
   let step=steps.find(s=>s*state.pxs>=64) || 600;
+  /* 길이가 비정상(Infinity/NaN)이거나 너무 길면 눈금 수를 묶어 둔다 — 여기서 끝없이 돌면 탭이 멈춘다 */
+  if(!isFinite(durS) || durS<0) durS=0;
+  if(durS/step > 4000) step=durS/4000;
   const frag=document.createDocumentFragment();
   for(let t=0;t<=durS;t+=step){
     const sp=document.createElement('span');
@@ -7378,9 +7401,17 @@ function scheduleClip(ctx, dest, c, base, t0, rate){
   const v0=(fi>0&&into<fi)? (into/fi)*v : v;
   gn.gain.setValueAtTime(Math.max(.0001,v0), cs);
   if(fi>into) gn.gain.linearRampToValueAtTime(v, at(c.start+fi-base));
-  if(fo>0&&ce-fo/R>cs){
-    gn.gain.setValueAtTime(v, at(end-base-fo));
-    gn.gain.linearRampToValueAtTime(.0001, ce);
+  if(fo>0){
+    if(end-fo>base){                          /* 페이드아웃이 아직 앞에 있다 */
+      if(ce-fo/R>cs) gn.gain.setValueAtTime(v, at(end-base-fo));
+      gn.gain.linearRampToValueAtTime(.0001, ce);
+    }else{
+      /* 이미 페이드아웃 안에서 시작 — 그 지점의 음량에서 이어서 내린다.
+         예전엔 이 경우 페이드가 통째로 빠져 원래 음량으로 나오다 뚝 끊겼다.
+         내보내기는 오디오를 구간별로 믹싱하므로 경계가 페이드 안에 떨어지면 결과 파일에도 들어갔다. */
+      gn.gain.setValueAtTime(Math.max(.0001, v*(end-base)/fo), cs);
+      gn.gain.linearRampToValueAtTime(.0001, ce);
+    }
   }
   src.connect(gn); gn.connect(dest);
   src.start(cs, c.in+into*c.speed, (c.dur-into)*c.speed);
@@ -7396,11 +7427,10 @@ function scheduleClip(ctx, dest, c, base, t0, rate){
    전체를 부드럽게 만다. */
 /* 곡 사이 전환음 — 직접 만든 테이프 효과음 파일을 쓴다.
    합성음은 아무리 다듬어도 진짜 카세트 소리를 못 따라가서 파일로 바꿨다.
-   파일은 4.57초이고, 카세트가 안착하는 '컹' 소리가 2.49초 지점에 있다.
-   그 지점이 곡 시작에 오도록 배치한다. */
-const TAPE_SRC='assets/transition.m4a';
-const TAPE_ANCHOR=2.49;                 /* 안착 클릭 위치(초) — 참고용 */
-const TAPE_LEN=4.57;                    /* 효과음 길이(초) = 곡 사이 빈자리 */
+   파일은 4.8초 — 0.7초 삽입, 1.8초 걸림, 2.8~3.1초 재생 버튼 '딸깍' 뒤로 잔향이 이어진다.
+   파일명을 바꾼 이유: 같은 경로면 브라우저·서비스워커 캐시에 옛 소리가 남는다. */
+const TAPE_SRC='assets/tape-transition.m4a';
+const TAPE_LEN=4.8;                     /* 효과음 길이(초) = 곡 사이 빈자리 */
 let tapeRaw=null; const tapeBufs=new Map();
 async function ensureTape(ctx){
   const sr=ctx.sampleRate;
@@ -7548,13 +7578,22 @@ function syncVideos(t, playing){
   eachVideoClip((c,tr,a)=>{
     if(!(t>=c.start-.35 && t<clipVisibleEnd(c,tr))) return;
     const prev=act.get(a);
-    if(!prev || c.start>prev.start) act.set(a,c);
+    /* 지금 보이는 컷이 준비 중인(아직 시작 전) 컷보다 우선 — 같은 소스로 이어 붙인 컷에서
+       앞 컷의 마지막 0.35초 동안 뒤 컷이 소스를 가져가 앞 컷이 튀던 문제 */
+    const vis=t>=c.start, pvis=prev && t>=prev.start;
+    if(!prev || (vis && !pvis) || (vis===pvis && c.start>prev.start)) act.set(a,c);
   });
   eachVideoClip((c,tr,a)=>{ if(!act.has(a) && !a.videoEl.paused) a.videoEl.pause(); });
   for(const [a,c] of act){
     const v=a.videoEl;
     const st=Math.min(a.duration-.05, Math.max(0,srcTimeOf(c,t)));
-    if(playing){
+    if(playing && srcTimeOf(c,t)<0){
+      /* 준비 구간(클립 시작 0.35초 전) — 소스가 아직 0초 이전이면 재생하지 않고 첫 프레임에 세워 둔다.
+         예전엔 여기서 미리 재생해 영상이 0.35초 앞서 나갔고, 클립이 보이기 직전에 0초로
+         되감으면서 첫머리가 턱 걸렸다. 첫 프레임을 미리 디코드해 두는 효과는 그대로다. */
+      if(!v.paused) v.pause();
+      if(v.currentTime>.03 && !v.seeking){ try{ v.currentTime=0; }catch(e){} }
+    }else if(playing){
       v.playbackRate=clamp(c.speed*(playing===true? playRate() : 1),.25,16);
       if(v.paused){
         /* play() 를 먼저 부른다. currentTime 을 바로 앞에 대입하면 그 탐색이 play 를
@@ -11694,7 +11733,16 @@ function renderBgPicker(){
     const b=document.createElement('button');
     b.className='bgth'+(state.bg.type==='image'&&state.bg.img===a.img?' on':'');
     b.title=a.name;
-    try{ b.style.backgroundImage=`url(${a.thumb||URL.createObjectURL(a.blob)})`; }catch(_){}
+    /* 작은 썸네일을 한 번만 만들어 둔다. 예전엔 renderAll(편집할 때마다)마다 원본으로
+       blob URL 을 새로 만들어 URL 이 끝없이 쌓이고 큰 사진을 매번 다시 디코딩했다. */
+    if(!a.thumb && !a.pickThumb){
+      try{ const tc=document.createElement('canvas'); tc.width=96;
+        tc.height=Math.max(1,Math.round(96*a.img.naturalHeight/Math.max(1,a.img.naturalWidth)));
+        tc.getContext('2d').drawImage(a.img,0,0,tc.width,tc.height);
+        a.pickThumb=tc.toDataURL('image/jpeg',.7); }catch(_){}
+    }
+    const th=a.thumb||a.pickThumb;
+    if(th) b.style.backgroundImage=`url(${th})`;
     b.addEventListener('click',()=>{ applyBgImage(a.blob||null, a.img); });
     row.appendChild(b);
   }
@@ -12936,7 +12984,7 @@ async function loadProject(name){
         const url=URL.createObjectURL(ar.blob);
         const v=document.createElement('video');
         v.muted=true; v.playsInline=true; v.preload='auto'; v.src=url;
-        await withTimeout(new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej;}),15000,'video load');
+        await loadVideoMeta(v);
         const a={id:ar.id,kind:'video',name:ar.name,blob:ar.blob,duration:v.duration,
           width:v.videoWidth,height:v.videoHeight,videoEl:v,audioBuffer:null,thumb:null,fh:ar.fh||null};
         try{ await seekVideo(v,Math.min(.5,v.duration/2));
@@ -13090,7 +13138,7 @@ $('projRelink').onclick=async()=>{
         Object.assign(asset,{blob:f, fh:f.__fh||null, duration:buf.duration, audioBuffer:buf, missingFile:false});
       }else{
         const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.src=URL.createObjectURL(f);
-        await withTimeout(new Promise((res,rej)=>{v.onloadedmetadata=res;v.onerror=rej;}),15000,'video load');
+        await loadVideoMeta(v);
         Object.assign(asset,{blob:f, fh:f.__fh||null, duration:v.duration, videoEl:v,
           width:v.videoWidth, height:v.videoHeight, missingFile:false});
       }
