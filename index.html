@@ -12032,7 +12032,6 @@ $('dpSave').addEventListener('click',()=>{
   setStatus(`「${nm}」로 저장했습니다 — 다음 영상에서 눌러 그대로 불러오세요.`);
 });
 $('dpName').addEventListener('keydown',e=>{ if(e.key==='Enter') $('dpSave').click(); });
-renderDPresets();
 document.querySelectorAll('.sub-h').forEach(h=>
   h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
 /* 프로젝트 목록 — 미리보기 오른쪽에서 열고 닫는다 */
@@ -13223,6 +13222,10 @@ $('tsCopy').addEventListener('click',async()=>{
 
 /* ═══════ 초기화 ═══════ */
 syncTapeLenUI();          /* 전환음 상수·버퍼가 다 선언된 뒤에 부른다 (TDZ 회피) */
+/* 저장해 둔 디자인 목록도 여기서 그린다 — 위쪽에서 부르면 DPRESET_KEY 가 아직
+   선언 전(TDZ)이라 dpList() 의 try/catch 가 그 오류를 삼키고 빈 목록을 돌려줬다.
+   그래서 처음 열었을 땐 아무것도 안 뜨고, 하나 저장해야 그제서야 보였다. */
+renderDPresets();
 refreshProjList();
 renderAll();
 if(document.fonts&&document.fonts.ready) document.fonts.ready.then(drawNow);
