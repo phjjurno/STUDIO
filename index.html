@@ -272,6 +272,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #bgPickRow .bgth{width:52px;height:34px;border-radius:7px;border:1.5px solid var(--line);background-size:cover;background-position:center;cursor:pointer;padding:0}
 #bgPickRow .bgth.on{border-color:var(--amber);box-shadow:0 0 0 1.5px var(--amber)}
 .preview-wrap.dragover{outline:2px dashed var(--amber);outline-offset:-6px}
+.grp-b.dragover{outline:2px dashed var(--amber);outline-offset:-4px;border-radius:8px}
+.kb{color:var(--dim);font-size:11px}
 #tlRub{position:absolute;border:1.5px dashed var(--sel);background:rgba(227,181,100,.12);z-index:10;display:none;pointer-events:none;border-radius:4px}
 
 /* ── 내보내기 대화상자 ── */
@@ -901,7 +903,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
       </div>
       </div></div>
 
-      <div class="grp"><div class="grp-h">자막 목록 · 파일 가져오기<span class="chev">▾</span></div><div class="grp-b">
+      <div class="grp"><div class="grp-h">자막 목록 · 파일 가져오기<span class="chev">▾</span></div><div class="grp-b" id="subDropZone">
       <div class="row" style="margin-top:8px">
         <button class="chip" id="srtImportBtn">📂 SRT·VTT·LRC 가져오기 (여러 개 가능)</button>
         <input type="file" id="srtFileInput" accept=".srt,.vtt,.lrc,.txt" multiple>
@@ -1083,7 +1085,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 
   <aside id="props">
     <h3>클립 속성</h3>
-    <div id="propsBody"><div class="hint2">타임라인에서 클립을 선택하면 속성이 표시됩니다.<br><br>단축키 —<br><b>Space</b> 재생/정지 · <b>S</b> 분할<br><b>Del</b> 삭제 · <b>Ctrl+Z / Y</b> 실행취소/재실행</div></div>
+    <div id="propsBody"><div class="hint2">타임라인에서 클립을 선택하면 속성이 표시됩니다.<br><br>단축키 —<br><b>Space</b> 재생/정지 · <b>S</b> 분할 · <b>C</b> 가위 · <b>M</b> 합치기<br><b>Del</b> 삭제 · <b>Ctrl+Z / Y</b> 실행취소/재실행</div></div>
   </aside>
 </div>
 
@@ -4870,6 +4872,18 @@ $('cutModeBtn').onclick=()=>{ state.cutMode=!state.cutMode; syncCutUI();
 syncCutUI();
 $('splitBtn').onclick=splitSel; $('dupBtn').onclick=dupSel; $('delBtn').onclick=delSel;
 $('mergeBtn').onclick=mergeSel;
+/* 버튼을 누르면 그 기능의 단축키를 상태줄 끝에 함께 알려 준다.
+   (버튼 자신의 처리가 끝난 뒤 붙도록 바깥에서 받는다) */
+const TL_KEYS={splitBtn:'S', cutModeBtn:'C', mergeBtn:'M', delBtn:'Del',
+               undoBtn:'Ctrl+Z', redoBtn:'Ctrl+Y'};
+$('tlBar').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  const el=$('status');
+  /* 단축키 없는 버튼을 눌렀을 때 앞 버튼의 안내가 남아 있으면 헷갈린다 — 먼저 지운다 */
+  const base=el.innerHTML.replace(/\s*(·\s*)?<span class="kb">[\s\S]*?<\/span>\s*$/,'');
+  const k=TL_KEYS[b.id];
+  el.innerHTML=k? (base? base+' · ':'')+`<span class="kb">단축키 <b>${k}</b></span>` : base;
+});
 
 /* 전체 다시 그리기 */
 function renderAll(){
@@ -10290,6 +10304,28 @@ function exportSubsFile(vtt){
 $('srtExportBtn').onclick=()=>exportSubsFile(false);
 $('vttExportBtn').onclick=()=>exportSubsFile(true);
 $('srtImportBtn').onclick=()=>$('srtFileInput').click();
+/* 자막 패널에 파일을 그대로 끌어다 놓아도 들어간다 */
+{
+  const z=$('subDropZone');
+  if(z){
+    const off=()=>z.classList.remove('dragover');
+    ['dragenter','dragover'].forEach(ev=>z.addEventListener(ev,e=>{
+      if(!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault(); e.stopPropagation();
+      try{ e.dataTransfer.dropEffect='copy'; }catch(err){}
+      z.classList.add('dragover');
+    }));
+    ['dragleave','dragend'].forEach(ev=>z.addEventListener(ev,off));
+    z.addEventListener('drop',async e=>{
+      if(!dtHasFiles(e.dataTransfer)) return;
+      e.preventDefault(); e.stopPropagation(); off();
+      const all=await grabDropFiles(e.dataTransfer);
+      const files=all.filter(isSubFile);
+      if(!files.length){ setStatus('자막·가사 파일(.srt · .vtt · .lrc · .txt)만 여기로 받습니다.'); return; }
+      await importSubFiles(files);
+    });
+  }
+}
 /* 가져올 자막 트랙 고르기 (자동 / S1 원문 / S2 번역) */
 $('subImpAuto').parentElement.addEventListener('click',e=>{
   const b2=e.target.closest('[data-imp]'); if(!b2) return;
@@ -11000,7 +11036,7 @@ function propsRenderMulti(){
 function propsRender(){
   const body=$('propsBody');
   const s=selClip();
-  if(!s){ body.innerHTML='<div class="hint2">타임라인에서 클립을 선택하면 속성이 표시됩니다.<br>여러 개를 고르면 크기·볼륨 등을 한 번에 조절할 수 있어요 (Shift+드래그 · Ctrl+클릭 · Ctrl+A).<br><br>단축키 —<br><b>Space</b> 재생/정지 · <b>S</b> 분할<br><b>Del</b> 삭제 · <b>Ctrl+Z / Y</b> 실행취소/재실행</div>'; return; }
+  if(!s){ body.innerHTML='<div class="hint2">타임라인에서 클립을 선택하면 속성이 표시됩니다.<br>여러 개를 고르면 크기·볼륨 등을 한 번에 조절할 수 있어요 (Shift+드래그 · Ctrl+클릭 · Ctrl+A).<br><br>단축키 —<br><b>Space</b> 재생/정지 · <b>S</b> 분할 · <b>C</b> 가위 · <b>M</b> 합치기<br><b>Del</b> 삭제 · <b>Ctrl+Z / Y</b> 실행취소/재실행</div>'; return; }
   if(selClipsAll().length>1){ propsRenderMulti(); return; }
   const {c,tr}=s;
   const a=c.assetId? A(c.assetId):null;
