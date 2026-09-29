@@ -1,5 +1,5 @@
 /* PULSEORIGN STUDIO — Service Worker v3 */
-const CACHE = 'pulseorign-v110';
+const CACHE = 'pulseorign-v111';
 const SHELL = ['./index.html', './manifest.json', './assets/lp_deck.png', './assets/lp_record.png', './assets/lp_arm.png', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -23,8 +23,12 @@ self.addEventListener('fetch', e => {
   /* index.html(문서) + 폰트/CDN — 네트워크 우선(항상 최신), 오프라인 시 캐시 */
   if (isDoc || url.hostname.includes('fonts.') || url.hostname.includes('cdn.') ||
       url.hostname.includes('jsdelivr') || url.hostname.includes('huggingface')) {
+    /* 브라우저 HTTP 캐시를 건너뛰고 항상 서버에 묻는다.
+       그냥 fetch 하면 GitHub Pages 가 HTML 에 걸어 둔 10분 캐시에 걸려,
+       새로 올린 뒤 새로고침해도 한동안 옛 index.html 이 그대로 돌아간다
+       (그걸 다시 캐시에 넣어 버려 더 오래 남는다). */
     e.respondWith(
-      fetch(e.request).then(r => {
+      fetch(e.request, { cache: 'no-store' }).then(r => {
         const clone = r.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone));
         return r;

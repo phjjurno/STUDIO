@@ -7999,8 +7999,8 @@ function makeVidDec(track, blob){
           f=find(); if(f) return f;
           break;
         }
-        if(await waitOutput(4000)){ idle=0; f=find(); if(f) return f; }
-        else if(++idle>=3) break;                     /* 4초씩 세 번 아무것도 안 나오면 포기 */
+        if(await waitOutput(1200)){ idle=0; f=find(); if(f) return f; }
+        else if(++idle>=2) break;   /* 1.2초씩 두 번 아무것도 안 나오면 포기(예전 12초는 너무 길었다) */
       }
       let best=null;                                  /* 못 찾으면 가장 가까운 이전 프레임 */
       for(const g of out) if(g.timestamp<=wantTs && (!best||g.timestamp>best.timestamp)) best=g;
@@ -12323,23 +12323,16 @@ async function makeStash(){
 async function startExport(){
   if(state.rendering) return;
   pause(); stopSnippet(); ensureCtx();
-  if(state.tape&&state.tape.on){ await ensureTape(actx); if(syncTapeGap()) renderAll(); }
-  const dur=tlDuration();
-  if(dur<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
+  if(tlDuration()<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
   if(!(window.VideoEncoder && window.AudioEncoder && window.Mp4Muxer)){
     offerRealtime('이 브라우저는 고속 렌더(WebCodecs)를 지원하지 않습니다.'); return;
   }
   const W=exp.w*exp.scale, H=exp.h*exp.scale, FPS=exp.fps;
-  /* ── 내보낼 구간 · 페이드 (구간 기준) ── */
-  const exStart=clamp(exp.start||0, 0, dur-0.05);
-  const exEnd=clamp(exp.end>exp.start? exp.end : dur, exStart+0.1, dur);
-  const outDur=exEnd-exStart;
-  const fadeIn=clamp(exp.fadeIn||0, 0, outDur/2);
-  const fadeOut=clamp(exp.fadeOut||0, 0, outDur/2);
-  /* 저장 위치를 제일 먼저 묻는다.
-     인코더 탐색(4K 는 여섯 조합을 실제로 돌려 본다) 뒤로 밀면 그 사이에 클릭 권한이
-     풀려서 showSaveFilePicker 가 SecurityError 로 막히고, 대화상자 없이 조용히
-     메모리 방식으로 넘어간다 — 「저장 폴더 고르는 게 사라졌다」가 이것이었다. */
+  /* 저장 위치를 제일 먼저 묻는다 — 여기 앞에 await 가 하나라도 있으면 안 된다.
+     브라우저는 「버튼을 누른 직후」에만 파일 창을 열어 주는데, 그 사이에 다른 걸
+     기다리면 권한이 풀려 showSaveFilePicker 가 SecurityError 로 막힌다. 그러면
+     대화상자 없이 조용히 메모리 방식으로 넘어가고, 긴 영상은 통째로 메모리에
+     들고 있다가 탭이 죽는다. 전환음 준비(ensureTape)가 이 앞에 있어서 그랬다. */
   let fileWritable=null;
   if(batchMode && batchDir){
     try{
@@ -12357,9 +12350,20 @@ async function startExport(){
       fileWritable=await handle.createWritable();
     }catch(e){
       if(e.name==='AbortError'){ setStatus('저장 위치 선택을 취소했습니다 — 메모리 방식으로 인코딩합니다…'); }
-      else setStatus('저장 위치 창을 열지 못해 메모리 방식으로 인코딩합니다 — 끝나면 다운로드 링크가 나옵니다.');
+      else setStatus(`저장 위치 창을 열지 못해(${e.name||'오류'}) 메모리 방식으로 인코딩합니다 — 긴 영상은 메모리가 모자랄 수 있으니, 실패하면 다시 눌러 저장 위치를 지정해 주세요.`);
     }
   }
+  /* 전환음은 파일을 받아 디코딩하는 비동기 작업이라 저장 위치를 물은 뒤에 한다.
+     빈자리가 바뀌면 타임라인 길이도 달라지므로 구간은 이 뒤에 계산한다. */
+  if(state.tape&&state.tape.on){ await ensureTape(actx); if(syncTapeGap()) renderAll(); }
+  const dur=tlDuration();
+  if(dur<=0.05){ setStatus('내보낼 클립이 없습니다.'); return; }
+  /* ── 내보낼 구간 · 페이드 (구간 기준) ── */
+  const exStart=clamp(exp.start||0, 0, dur-0.05);
+  const exEnd=clamp(exp.end>exp.start? exp.end : dur, exStart+0.1, dur);
+  const outDur=exEnd-exStart;
+  const fadeIn=clamp(exp.fadeIn||0, 0, outDur/2);
+  const fadeOut=clamp(exp.fadeOut||0, 0, outDur/2);
   /* 코덱 확인 — 하드웨어 인코더 우선 선택
      latencyMode는 'quality': 파일 저장(오프라인)에서는 인코더가 프레임을 여러 장
      동시에 물고 처리해 처리량이 realtime의 약 2배. realtime은 실시간 송출용이라
@@ -12457,7 +12461,16 @@ async function startExport(){
     {
       const seen=new Set(); let wc=0, all=0;
       const list=[]; eachVideoClip((c,tr,a)=>{ if(!seen.has(a)){ seen.add(a); list.push(a); } });
-      for(const a of list){ all++; if(await attachVidDec(a)) wc++; }
+      /* 붙이는 데 오래 걸리는 파일이 있으면 거기서 내보내기가 멈춘 것처럼 보인다.
+         표본표가 큰 긴 파일·검증용 탐색이 느린 파일이 그렇다 — 12초 넘으면 포기하고
+         그 소스만 예전 방식으로 간다. */
+      for(const a of list){ all++;
+        let d=null;
+        try{ d=await withTimeout(attachVidDec(a), 12000, 'decoder attach timeout'); }
+        catch(err){ a.wcSkip='준비가 오래 걸림'; a.wcTried=true;
+          if(a.wcDec){ try{ a.wcDec.close(); }catch(e2){} a.wcDec=null; } }
+        if(d) wc++;
+      }
       /* 소스보다 훨씬 크게 뽑으면 화질은 그대로인데 인코딩만 무거워진다.
          720p 소스를 4K 로 뽑는 경우가 흔한데, 픽셀은 9배라 시간도 그만큼 든다. */
       let maxPx=0, srcLabel='';
