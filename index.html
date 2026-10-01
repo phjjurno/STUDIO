@@ -8060,7 +8060,15 @@ async function verifyVidDec(a, dec, track){
      조각난 MP4(화면 녹화·일부 카메라)는 표본표가 없어 못 읽고,
      붙기 전에 <video> 그림과 맞대어 보아 다르면 버리고(verifyVidDec),
      한 장에 200ms 넘는 일이 세 번 이어지면 그 소스만 예전 방식으로 돌린다. */
-let WC_ON=false;   /* 사용자 요청으로 뺐다 — 예전 <video> 재생 방식만 쓴다 */
+/* 직접 디코딩 — 스위치 없이 안쪽에서 쓴다.
+   실제 내보내기 결과물을 프레임마다 다시 읽어 센 값(1080p 소스 6초 · 180프레임):
+              1080p 출력          4K 출력
+     재생 방식  루프1~2초·중복/건너뜀 4~23   루프3초·11~29
+     직접       루프3초 ·0          루프3초·0       ← 4K 는 같은 속도에 끊김 없음
+   (화면 갱신 신호에 묶어 프레임을 잡던 방식은 실제 부하에서 0.2~0.5배속으로
+   무너져 뺐다.) 못 읽는 파일 — 조각난 MP4·검증 불일치·느림 — 은 그 소스만
+   재생 방식으로 넘어간다. */
+let WC_ON=true;
 /* 소스에 디코더를 붙인다 — 안 되는 파일이면 조용히 예전 방식으로 남는다 */
 async function attachVidDec(a){
   if(a.wcDec && !a.wcDec.dead) return a.wcDec;
@@ -12262,6 +12270,16 @@ async function startExport(){
 
   const rcanvas=document.createElement('canvas'); rcanvas.width=W; rcanvas.height=H;
   const rg=rcanvas.getContext('2d',{alpha:false});
+  /* 4K급(2x)은 1x 크기로 그린 뒤 키워서 인코딩한다.
+     유튜브는 파일 해상도로 4K 를 판정하므로 그림을 실제로 4K 로 그릴 필요가 없다.
+     파형·글자·흐림·빛 번짐 같은 그리기 비용이 픽셀 수만큼(1/4) 줄고,
+     인코더에는 그대로 3840×2160 이 들어가 4K 로 올라간다. */
+  const UPX = exp.scale>1 && exp.upscale!==false;
+  const dW = UPX? Math.round(W/exp.scale) : W, dH = UPX? Math.round(H/exp.scale) : H;
+  let dcanvas=rcanvas, dg=rg;
+  if(UPX){ dcanvas=document.createElement('canvas'); dcanvas.width=dW; dcanvas.height=dH;
+           dg=dcanvas.getContext('2d',{alpha:false});
+           rg.imageSmoothingEnabled=true; rg.imageSmoothingQuality='high'; }
 
   const muxTarget = fileWritable
     ? new Mp4Muxer.FileSystemWritableFileStreamTarget(fileWritable, {chunked:true})
@@ -12333,8 +12351,9 @@ async function startExport(){
       upscaleNote = (maxPx && W*H > maxPx*3)
         ? `소스는 ${srcLabel} 인데 ${W}×${H} 로 뽑는 중 — 화질은 소스 이상 좋아지지 않고 인코딩만 약 ${(W*H/maxPx).toFixed(0)}배 무겁습니다`
         : '';
+      for(const a of list) a.wcOff=null;
       if(all) setStatus(`영상 소스 ${all}개 — 직접 디코딩 ${wc}개`
-                        + (wc<all? ` · 기존 방식 ${all-wc}개`:'') + ' — 인코딩을 시작합니다…');
+                        + (wc<all? ` · 재생 방식 ${all-wc}개`:'') + ' — 인코딩을 시작합니다…');
     }
     /* QMAX는 위에서 인코더 프로브와 같은 값으로 이미 정했다 */
 
@@ -12413,10 +12432,11 @@ async function startExport(){
         if(vidP) await vidP;
         const bw2=performance.now(); tmVid+=bw2-bw1;
         computeSpectrum(specSrc, clamp(t-from, 0, span-.02));
-        drawFrame(t, true, rg, W, H, false);
-        tmDraw+=performance.now()-bw2;
+        drawFrame(t, true, dg, dW, dH, false);
         if(fadeIn>0||fadeOut>0){ const bf=1-fadeF(ot);   /* 화면 검정 페이드 */
-          if(bf>0){ rg.save(); rg.globalAlpha=Math.min(1,bf); rg.fillStyle='#000'; rg.fillRect(0,0,W,H); rg.restore(); } }
+          if(bf>0){ dg.save(); dg.globalAlpha=Math.min(1,bf); dg.fillStyle='#000'; dg.fillRect(0,0,dW,dH); dg.restore(); } }
+        if(UPX) rg.drawImage(dcanvas, 0, 0, W, H);       /* 인코더 크기로 키운다 (GPU 한 번) */
+        tmDraw+=performance.now()-bw2;
         const sb0=performance.now();
         const vf=new VideoFrame(rcanvas,{timestamp:Math.round(fNext*1e6/FPS),duration:Math.round(1e6/FPS)});
         vEnc.encode(vf,{keyFrame:fNext%(FPS*2)===0}); vf.close();
