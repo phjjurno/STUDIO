@@ -926,6 +926,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <button class="chip" id="shOptimize" style="border-color:var(--amber);color:var(--amber)">📱 쇼츠용으로 최적화</button>
         <button class="chip" id="shRestore">↩ 가로(16:9)로 되돌리기</button>
       </div>
+      <label class="row" style="margin-top:8px;gap:6px;align-items:center;cursor:pointer;font-size:12px;color:var(--dim)">
+        <input type="checkbox" id="shThumbGuide" checked> 썸네일 잘림 선 보기 <small class="usuf">(미리보기에만 · 영상엔 안 들어감)</small></label>
       </div></div>
 
       <div class="grp"><div class="grp-h">리릭 비디오 — 번역 줄<span class="chev">▾</span></div><div class="grp-b">
@@ -981,6 +983,17 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
         <span style="min-width:52px">띠 투명도</span>
         <input type="range" id="shBandOp" min="0" max="100" value="100" style="flex:1">
         <b id="shBandOpV" style="min-width:38px;text-align:right">100%</b>
+      </div>
+      <div class="row" id="shPadTWrap" style="margin-top:4px;gap:6px;align-items:center;font-size:12px;color:var(--dim)">
+        <span style="min-width:52px">위 여백</span>
+        <input type="range" id="shPadT" min="0" max="30" step="0.5" value="10" style="flex:1">
+        <b id="shPadTV" style="min-width:38px;text-align:right">자동</b>
+      </div>
+      <div class="row" id="shPadBWrap" style="margin-top:4px;gap:6px;align-items:center;font-size:12px;color:var(--dim)">
+        <span style="min-width:52px">아래 여백</span>
+        <input type="range" id="shPadB" min="0" max="30" step="0.5" value="2" style="flex:1">
+        <b id="shPadBV" style="min-width:38px;text-align:right">자동</b>
+        <button class="chip" id="shPadAuto" style="padding:3px 8px">자동</button>
       </div>
       <div id="shPrev" class="shprev"><span></span></div>
       <div class="row" id="shHookList" style="margin-top:6px;flex-direction:column;align-items:stretch;gap:4px"></div>
@@ -3202,6 +3215,14 @@ let postBus=null, pitchNode=null, pitchReady=null;
 const canvas=document.getElementById('canvas'), pctx=canvas.getContext('2d',{alpha:false});
 let R={g:pctx, w:canvas.width, h:canvas.height, preview:true, T:0, live:false};
 let HIT=[];
+/* 썸네일 잘림 선 설정 — drawFrame 이 초기화 중에 불려도 TDZ 에 걸리지 않게 앞에 둔다 */
+let thumbGuide=true;
+try{ const v=localStorage.getItem('pulseorign.thumbGuide'); if(v!==null) thumbGuide=(v==='1'); }catch(e){}
+const THUMB_CROPS=[
+  {ar:3/4, label:'인스타 격자 3:4',        col:'rgba(255,61,139,.95)'},
+  {ar:4/5, label:'인스타 피드 4:5',        col:'rgba(255,176,64,.95)'},
+  {ar:1,   label:'유튜브 쇼츠 선반 ≈1:1',  col:'rgba(53,231,255,.98)'},
+];
 const $=id=>document.getElementById(id);
 
 /* ───────── 유틸 ───────── */
@@ -8351,7 +8372,7 @@ function drawFrame(t, live, g, w, h, isPreview, wallT){
   drawOverlays(t);
   drawSubs(t);
   drawLogo();
-  if(isPreview){ drawMissingWarn(); drawHover(); }
+  if(isPreview){ drawMissingWarn(); drawThumbGuide(); drawHover(); }
 }
 
 /* 링크가 끊긴 파일이 있으면 미리보기에 대놓고 띄운다 —
@@ -9012,13 +9033,23 @@ function paintOverlay(c, lt, alpha){
            안쪽으로 들여 놓는다. 휴대폰 쇼츠는 위에 앱 UI·노치가, 아래에 제목·버튼이
            겹쳐서 화면 끝에 붙은 글자가 잘려 보였다. 띠 자체는 끝까지 채워 인상은 유지. */
         const SAFE_T=h*BAND_SAFE_T, SAFE_B=h*BAND_SAFE_B;
-        /* 띠 높이 — 미리보기에서 안쪽 가장자리를 끌어 조절한 값이 있으면 그걸 쓴다.
-           글자보다 작아지지는 않는다. */
-        const bandH=(c.obandH!=null)? Math.max(totH, clamp(c.obandH,.02,.6)*h) : totH+padY*2;
         const atTop=(c.tx.y<=.5);
-        let bandTop, bandBot, in0, in1;
-        if(atTop){ bandTop=0; bandBot=SAFE_T+bandH; in0=SAFE_T; in1=bandBot; }
-        else { bandBot=h; bandTop=h-(SAFE_B+bandH); in0=bandTop; in1=h-SAFE_B; }
+        /* 글자 위·아래 여백 — 쇼츠 탭 「위 여백 · 아래 여백」이나 미리보기에서 띠 안쪽
+           가장자리를 끌어 정한다(화면 높이 대비 비율). 안 정했으면 예전처럼 자동:
+           화면 끝 쪽은 휴대폰 UI 를 피하는 안전 여백 + 글자 둘레 여백. */
+        let pT, pB;
+        if(c.obandH!=null && c.obandPadT==null && c.obandPadB==null){   /* 예전 프로젝트 — 띠 높이만 저장돼 있다 */
+          const bh=Math.max(totH, clamp(c.obandH,.02,.6)*h), half=(bh-totH)/2;
+          pT = atTop? SAFE_T+half : half;  pB = atTop? half : SAFE_B+half;
+        }else{
+          pT = (c.obandPadT!=null)? clamp(c.obandPadT,0,.5)*h : (atTop? SAFE_T+padY : padY);
+          pB = (c.obandPadB!=null)? clamp(c.obandPadB,0,.5)*h : (atTop? padY : SAFE_B+padY);
+        }
+        let bandTop, bandBot, textTop;
+        if(atTop){ bandTop=0; bandBot=pT+totH+pB; textTop=pT; }
+        else { bandBot=h; bandTop=h-(pT+totH+pB); textTop=bandTop+pT; }
+        if(R.preview) c._band={pT, pB, totH, atTop, h};       /* 끌어 조절할 때 쓴다 */
+        const innerH=Math.max(totH, atTop? bandBot-SAFE_T : (h-SAFE_B)-bandTop);
         g.save(); g.shadowBlur=0; g.shadowOffsetY=0;
         /* 띠만 투명해진다 — 글자는 그대로 또렷하게 남는다 */
         g.globalAlpha=clamp(alpha,0,1)*(c.obandOp==null? 1 : clamp(c.obandOp,0,1));
@@ -9027,12 +9058,12 @@ function paintOverlay(c, lt, alpha){
         /* 반대쪽에도 띠 — 위아래로 감싸서 가운데에 시선이 모이게 */
         let b2Top=null, b2H=0;
         if(c.oband2!==false){
-          b2H=(c.obandH2!=null)? clamp(c.obandH2,0,.6)*h : Math.min(bandH, h*.22);
+          b2H=(c.obandH2!=null)? clamp(c.obandH2,0,.6)*h : Math.min(innerH, h*.22);
           b2Top = atTop? (h-b2H) : 0;
           g.fillRect(0, b2Top, w, b2H);
         }
         g.restore();
-        let cy=in0+((in1-in0)-totH)/2;      /* 글자는 띠 안쪽 가운데 */
+        let cy=textTop;
         lines.forEach((L,i)=>{ const fz=sizes[i]; cy+=fz*.94;
           const base=(i===0? col : (c.oink2||'#FFFFFF'));
           /* 강조가 줄 색과 같으면 안 보이므로 반대쪽 색을 쓴다 */
@@ -9796,8 +9827,15 @@ function bandSpec(c, opp){
   const onTop = opp? (c.tx.y>.5) : (c.tx.y<=.5);
   return { edge:true, edges:[onTop? 's' : 'n'],
     setEdge:py=>{
-      if(opp) c.obandH2=clamp(onTop? py/H : (H-py)/H, 0, .6);
-      else    c.obandH =clamp(onTop? (py-H*BAND_SAFE_T)/H : (H-H*BAND_SAFE_B-py)/H, .02, .6);
+      if(opp){ c.obandH2=clamp(onTop? py/H : (H-py)/H, 0, .6); return; }
+      /* 메인 띠의 안쪽 가장자리를 끌면 그쪽 여백이 바뀐다 — 위쪽 띠면 아래 여백,
+         아래쪽 띠면 위 여백. 반대편 여백은 지금 값 그대로 굳혀 둔다. */
+      const L=c._band; if(!L) return;
+      const k=L.h? H/L.h : 1, pT=L.pT*k, pB=L.pB*k, tH=L.totH*k;
+      if(onTop){ c.obandPadT=pT/H; c.obandPadB=clamp((py-pT-tH)/H, 0, .5); }
+      else     { c.obandPadB=pB/H; c.obandPadT=clamp((H-pB-tH-py)/H, 0, .5); }
+      c.obandH=null;
+      if(c.ohook){ hookSty.padT=c.obandPadT; hookSty.padB=c.obandPadB; syncHookPadUI(); }
     } };
 }
 function resizeSpec(id){
@@ -9856,6 +9894,35 @@ function cvSnap(ax, ay, D, disabled){
   if(bx){ ax+=bx.c-cx; snapGuides.push({x:bx.line}); }
   if(by){ ay+=by.c-cy; snapGuides.push({y:by.line}); }
   return {x:ax, y:ay};
+}
+/* ── 썸네일 잘림 선 ──
+   세로 쇼츠가 피드·채널에서 썸네일로 보일 땐 가운데만 남기고 위아래를 자른다.
+   그 경계를 미리보기에만 그린다(내보낸 영상에는 안 들어간다).
+     인스타 프로필 격자 3:4 (1080×1440) · 인스타 피드 4:5 (1080×1350)
+     유튜브 채널 쇼츠 선반 ≈1:1 — 가장 좁으므로 여기 안에 두면 셋 다 안전하다. */
+function drawThumbGuide(){
+  if(!thumbGuide) return;
+  const {g,w,h}=R; if(h<w*1.3) return;              /* 세로 화면일 때만 */
+  g.save();
+  const y0=(h-w)/2, y1=(h+w)/2;                     /* 가장 좁은 안전 구역 바깥을 살짝 어둡게 */
+  g.fillStyle='rgba(0,0,0,.26)';
+  g.fillRect(0,0,w,y0); g.fillRect(0,y1,w,h-y1);
+  /* 미리보기는 작게 줄여 보이므로 선·글씨 굵기를 화면에 보이는 크기 기준으로 잡는다 */
+  const k=(g===pctx && canvas.clientWidth)? w/canvas.clientWidth : 1;
+  const lw=Math.max(w*.0022, 1.6*k), fs=Math.round(Math.max(w*.022, 11*k));
+  g.font=`700 ${fs}px 'Noto Sans KR',sans-serif`; g.textBaseline='bottom';
+  g.shadowColor='rgba(0,0,0,.85)'; g.shadowBlur=fs*.35;
+  THUMB_CROPS.forEach((cr,i)=>{
+    const vh=w/cr.ar, a=(h-vh)/2, b=(h+vh)/2;
+    g.strokeStyle=cr.col; g.lineWidth=lw; g.setLineDash([Math.max(w*.014,6*k), Math.max(w*.009,4*k)]);
+    for(const y of [a,b]){ g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke(); }
+    g.setLineDash([]);
+    /* 3:4 와 4:5 선은 가까워서 글씨가 겹친다 — 번갈아 왼쪽·오른쪽에 단다 */
+    const right=(i%2===1);
+    g.textAlign=right? 'right' : 'left';
+    g.fillStyle=cr.col; g.fillText(cr.label, right? w*.98 : w*.02, a-lw*1.5);
+  });
+  g.restore();
 }
 function drawHover(){
   const {g,w,h}=R;
@@ -11040,12 +11107,13 @@ const HK_STYLES=[['banner','썸네일 배너'],['pop','팝아웃'],['neon','네�
                  ['grad','그라디언트'],['hilite','형광펜'],['shadow3d','입체'],['plain','기본']];
 const HK_COLORS=['#FFD400','#C6FF3D','#FF3D8B','#35E7FF','#FF7A29','#FFFFFF','#B78BFF'];
 const HK_ANIMS=[['pop','팝인'],['rise','올라오기'],['pulse','두근'],['none','없음']];
-const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true, band2:true, bandOp:1};
+const hookSty={style:'banner', color:'#FFD400', color2:'#0B0B0D', sub:'#FFFFFF', anim:'pop', font:0, size:1.25, hold:true, band2:true, bandOp:1, padT:null, padB:null};
 /* 후킹 문구 세로 위치 — 휴대폰 쇼츠 상단은 앱 UI·노치가 덮어서 0.16은 잘려 보였다 */
 const HOOK_Y=0.24;
 function hookExtra(){ return {ohook:true, ofont:hookSty.font, osize:hookSty.size, ocolor:hookSty.color,
   ocolor2:hookSty.color2, oink:'#0B0B0D', oink2:hookSty.sub, oband:'#000000', oband2:hookSty.band2,
-  obandOp:hookSty.bandOp, ostyle:hookSty.style, oanim:hookSty.anim}; }
+  obandOp:hookSty.bandOp, obandPadT:hookSty.padT, obandPadB:hookSty.padB,
+  ostyle:hookSty.style, oanim:hookSty.anim}; }
 function renderHookStyle(){
   const sr=$('shStyleRow'), cr=$('shColorRow'), ar=$('shAnimRow'); if(!sr) return;
   const mk=(box,list,cur,set,paint)=>{ box.innerHTML='';
@@ -11062,6 +11130,8 @@ function renderHookStyle(){
   $('shColor2Wrap').style.display=isBanner?'':'none';
   $('shBand2Wrap').style.display=isBanner?'':'none';
   if($('shBandOpWrap')) $('shBandOpWrap').style.display=isBanner?'':'none';
+  for(const id of ['shPadTWrap','shPadBWrap']) if($(id)) $(id).style.display=isBanner?'':'none';
+  syncHookPadUI();
   if($('shBand2')) $('shBand2').checked=hookSty.band2;
   if($('shBandOp')){ const bv=Math.round(hookSty.bandOp*100);
     $('shBandOp').value=bv; $('shBandOpV').textContent=bv+'%'; }
@@ -11182,6 +11252,38 @@ function addHookOverlay(text, atT, dur){
 }
 $('shColorCustom').addEventListener('input',e=>{ hookSty.color=e.target.value; renderHookStyle(); applyHookStyle(); });
 $('shBand2').addEventListener('change',e=>{ hookSty.band2=e.target.checked; applyHookStyle(); });
+/* 배너 위·아래 여백 — 자동이면 지금 실제로 쓰이는 값을 보여 준다 */
+function syncHookPadUI(){
+  const t=$('shPadT'), b=$('shPadB'); if(!t||!b) return;
+  const T=state.tracks.find(x=>x.kind==='over');
+  const c0=T && T.clips.find(c=>c.ohook && (c.ostyle||'plain')==='banner');
+  const L=c0 && c0._band;
+  const eff=(v,px)=> v!=null? v*100 : (L&&L.h? px/L.h*100 : null);
+  const vt=eff(hookSty.padT, L&&L.pT), vb=eff(hookSty.padB, L&&L.pB);
+  if(vt!=null) t.value=vt.toFixed(1);
+  if(vb!=null) b.value=vb.toFixed(1);
+  $('shPadTV').textContent = hookSty.padT==null? '자동' : vt.toFixed(1)+'%';
+  $('shPadBV').textContent = hookSty.padB==null? '자동' : vb.toFixed(1)+'%';
+}
+$('shPadT').addEventListener('input',e=>{ hookSty.padT=clamp(+e.target.value,0,30)/100;
+  if(hookSty.padB==null){ const L=(()=>{ const T=state.tracks.find(x=>x.kind==='over');
+      const c0=T&&T.clips.find(c=>c.ohook&&c._band); return c0&&c0._band; })();
+    if(L&&L.h) hookSty.padB=L.pB/L.h; }                 /* 한쪽만 손대면 다른 쪽은 지금 값으로 굳힌다 */
+  applyHookStyle(); syncHookPadUI(); });
+$('shPadB').addEventListener('input',e=>{ hookSty.padB=clamp(+e.target.value,0,30)/100;
+  if(hookSty.padT==null){ const L=(()=>{ const T=state.tracks.find(x=>x.kind==='over');
+      const c0=T&&T.clips.find(c=>c.ohook&&c._band); return c0&&c0._band; })();
+    if(L&&L.h) hookSty.padT=L.pT/L.h; }
+  applyHookStyle(); syncHookPadUI(); });
+{ const cb=$('shThumbGuide');
+  if(cb){ cb.checked=thumbGuide;
+    cb.addEventListener('change',()=>{ thumbGuide=cb.checked;
+      try{ localStorage.setItem('pulseorign.thumbGuide', thumbGuide?'1':'0'); }catch(e){}
+      drawNow(); }); } }
+$('shPadAuto').addEventListener('click',()=>{ hookSty.padT=hookSty.padB=null;
+  const T=state.tracks.find(x=>x.kind==='over');
+  if(T) for(const c of T.clips) if(c.ohook) c.obandH=null;
+  applyHookStyle(); drawNow(); syncHookPadUI(); });
 $('shBandOp').addEventListener('input',e=>{ hookSty.bandOp=clamp(+e.target.value,0,100)/100;
   $('shBandOpV').textContent=Math.round(hookSty.bandOp*100)+'%'; applyHookStyle(); });
 $('shColor2Custom').addEventListener('input',e=>{ hookSty.sub=e.target.value; renderHookStyle(); applyHookStyle(); });
